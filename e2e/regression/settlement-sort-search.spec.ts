@@ -148,19 +148,22 @@ test.describe("정산 — 정렬 + 검색 회귀", () => {
   });
 
   test("R3: admin settlement uses the order-confirmed date for its month filter", async ({ page }) => {
+    // [2026-08-31] 컷오프 정책: orderDate >= '2026-09-01'인 발주만 새 정책(발주확정 시점) 적용.
+    //   원 테스트는 orderDate 2026-06-30이라 컷오프 이전 → 옛 규칙(shipDate)으로 fallback되어 실패함.
+    //   → 컷오프 이후 날짜로 이관 (의도: "확정월로 필터되는지" 유지)
     const result = await page.evaluate(async () => {
       const orders = (window as any).DB.get("orders", []);
       orders.push({
         id: 88001,
-        orderNum: "CONFIRMED-IN-JULY-ADMIN-1",
+        orderNum: "CONFIRMED-IN-OCT-ADMIN-1",
         deliveryTo: "명세서없음관리자표시",
         address: "테스트 주소",
-        orderDate: "2026-06-30",
-        shipDate: "2026-08-01",
+        orderDate: "2026-09-15",
+        shipDate: "2026-11-01",
         warehouse: "시흥",
         status: "출고완료",
         statusHistory: [
-          { status: "발주확정", changedAt: "2026-07-05T00:00:00.000Z" },
+          { status: "발주확정", changedAt: "2026-10-05T00:00:00.000Z" },
         ],
         createdBy: "orderer",
         totalSupply: 10000,
@@ -169,11 +172,11 @@ test.describe("정산 — 정렬 + 검색 회귀", () => {
       });
       await (window as any).DB.set("orders", orders);
       const rows = await (window as any).fetchCompletedOrders({
-        range: { startDate: "2026-07-01", endDate: "2026-07-31" },
+        range: { startDate: "2026-10-01", endDate: "2026-10-31" },
         ordererSearch: "",
         warehouse: "",
       });
-      return rows.some((o: any) => o.orderNum === "CONFIRMED-IN-JULY-ADMIN-1");
+      return rows.some((o: any) => o.orderNum === "CONFIRMED-IN-OCT-ADMIN-1");
     });
 
     expect(result).toBe(true);

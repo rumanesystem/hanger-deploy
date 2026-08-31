@@ -68,8 +68,19 @@ function _toKstDateStr(raw) {
 
 // 정산·원장 기준일: **최초** 관리자 발주확정 시각 우선(KST 기준, 회계 관행: 최초 확정일 고정)
 // 폴백: shipDate → orderDate (옛 데이터에 statusHistory 없고 shipDate=0000-00-00인 경우 방어)
+// [2026-08-31] 정책 A 적용 컷오프: orderDate >= '2026-09-01'인 신규 발주서만 새 정책.
+//   그 이전 발주서는 옛 규칙 (shipDate → orderDate) 유지 → 회계 마감된 옛 정산월 안 흔들림.
+const SETTLEMENT_POLICY_A_CUTOFF = '2026-09-01';
 function getSettlementDate(order) {
   if (!order) return '';
+  // 컷오프 이전 발주서: 옛 규칙 (shipDate → orderDate)
+  const _od = coerceDateForFilter(order.orderDate || '');
+  if (_od && _od !== '0000-00-00' && _od < SETTLEMENT_POLICY_A_CUTOFF) {
+    const _sd = coerceDateForFilter(order.shipDate || '');
+    if (_sd && _sd !== '0000-00-00') return _sd;
+    return _od;
+  }
+  // 컷오프 이후 발주서: 새 정책 (최초 발주확정 시점)
   const history = Array.isArray(order.statusHistory) ? order.statusHistory : [];
   // [2026-08-27] 최초 확정일 정책: 앞에서부터 스캔 → 첫 '발주확정' 이벤트 채택.
   //   재확정(취소→되돌리기, 해제→재확정 등) 시에도 정산 월이 흔들리지 않도록 고정.
