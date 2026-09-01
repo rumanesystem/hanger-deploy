@@ -161,7 +161,7 @@ test.describe("정산 — 정렬 + 검색 회귀", () => {
         orderDate: "2026-09-15",
         shipDate: "2026-11-01",
         warehouse: "시흥",
-        status: "출고완료",
+        status: "발주확정",
         statusHistory: [
           { status: "발주확정", changedAt: "2026-10-05T00:00:00.000Z" },
         ],
@@ -198,7 +198,8 @@ test.describe("정산 — 정렬 + 검색 회귀", () => {
         orderDate: "2026-07-31",
         shipDate: "2026-08-01",
         warehouse: "시흥",
-        status: "출고완료",
+        // [2026-08-31] legacy '출고완료' → 실무 '발주확정'으로 이관 (메모리 규칙 준수)
+        status: "발주확정",
         createdBy: "orderer",
         totalSupply: 10000,
         totalVat: 1000,
