@@ -1125,7 +1125,15 @@ function renderOrders(){
       //   발주대기 상태는 아직 출고확정 전 → 발주자한테 명세서 안 뜸 (관리자만)
       const _statusOK=(o.status==='출고완료'||o.status==='발주확정'||o.status==='발주대기');
       const _isOrdererVisible=(o.status==='출고완료'||o.status==='발주확정'); // 발주자 노출 = 출고확정 이후만
-      const _canSeeInv=isAdmin()?_statusOK:(_isOrdererVisible && currentUser&&o.createdBy===currentUser.id);
+      // [2026-09-01] legacy fallback — settlement/query.js:_canViewSettlementOrder와 동일 로직
+      const _isOwnerRow = (()=>{
+        if (!currentUser) return false;
+        if (o.createdBy) return o.createdBy === currentUser.id;
+        const deliveryName = String(currentUser.deliveryName || currentUser.name || '').trim();
+        const orderDelivery = String(o.deliveryTo || o.siteName || '').trim();
+        return !!deliveryName && orderDelivery === deliveryName;
+      })();
+      const _canSeeInv=isAdmin()?_statusOK:(_isOrdererVisible && _isOwnerRow);
       // [2026-08-03 B8] 관리자에게 검토 대기 명세서 뱃지 표시
       const _needsReview=isAdmin()&&_needsReviewOrderNums.has(o.orderNum);
       const reviewBadge=_needsReview?'<span class="badge" style="margin-left:3px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;font-size:10px;padding:2px 6px" title="수기 편집 명세서에 최신 발주 내용 반영 대기. 명세서 열어 확인·저장 필요"><i class="fas fa-exclamation-triangle"></i> 검토</span>':'';
@@ -1714,7 +1722,14 @@ function openOrderDetail(orderId){
   {
     const existingInvBtn=document.getElementById('detail-invoice-btn');
     if(existingInvBtn)existingInvBtn.remove();
-    const _isOwner=currentUser&&order.createdBy===currentUser.id;
+    // [2026-09-01] legacy fallback — settlement/query.js:_canViewSettlementOrder와 동일 로직
+    const _isOwner = (()=>{
+      if (!currentUser) return false;
+      if (order.createdBy) return order.createdBy === currentUser.id;
+      const deliveryName = String(currentUser.deliveryName || currentUser.name || '').trim();
+      const orderDelivery = String(order.deliveryTo || order.siteName || '').trim();
+      return !!deliveryName && orderDelivery === deliveryName;
+    })();
     // 발주자에게는 sentToCustomer=true 인 활성 invoice가 있을 때만 노출
     // C1 fix: 캐시 비어있으면 비동기 페치 트리거 (영구 누락 방지)
     const _invList=(typeof DB!=='undefined'&&typeof DB.get==='function'?DB.get('invoices',[]):[]);
