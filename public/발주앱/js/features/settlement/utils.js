@@ -118,9 +118,13 @@ function _buildInvoiceMapForSettlement() {
     const invoices = (typeof DB !== 'undefined' && typeof DB.get === 'function')
       ? DB.get('invoices', [])
       : [];
+    // [2026-08-31] 정책 통일: 발주자한테 needsManualReview(재검토 대기) invoice 금액 노출 금지
+    //   query.js `_fetchSettlementInvoiceMap`와 동일 규칙 (요약·거래처별 합계도 같은 정책)
+    const adminView = (typeof isAdmin === 'function') && isAdmin();
     const map = {};
     invoices.forEach(inv => {
       if (!inv || inv.cancelled || !inv.orderNum) return;
+      if (!adminView && inv.needsManualReview) return;
       const prev = map[inv.orderNum];
       if (!prev || (inv.createdAt || '') > (prev.createdAt || '')) {
         map[inv.orderNum] = inv;

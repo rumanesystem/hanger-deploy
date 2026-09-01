@@ -273,20 +273,14 @@ function renderOrderRow(o) {
   const activeInvoices=(typeof DB!=='undefined'&&typeof DB.get==='function'?DB.get('invoices',[]):[])
     .filter(i=>i&&!i.cancelled&&i.orderNum===o.orderNum);
   const hasSentInvoice=activeInvoices.some(i=>i.sentToCustomer);
-  const canOpenInvoice=canEditSettlement||hasSentInvoice;
-  const sendButton = canEditSettlement ? (() => {
-    // M4 fix: 초기 라벨에 sentToCustomer 상태 반영
-    const _sent=activeInvoices.length>0&&activeInvoices[activeInvoices.length-1].sentToCustomer;
-    const _label=_sent?'<i class="fas fa-check-circle"></i> 전송됨':'<i class="fas fa-paper-plane"></i> 전송';
-    const _style=_sent
-      ?'margin-left:4px;padding:4px 8px;font-size:12px;border:1px solid #16a34a;background:#16a34a;color:#fff;border-radius:4px;cursor:pointer;font-weight:700'
-      :'margin-left:4px;padding:4px 8px;font-size:12px;border:1px solid #16a34a;background:#fff;color:#16a34a;border-radius:4px;cursor:pointer;font-weight:700';
-    // H4 보강 (Codex): inline onclick 제거 — data-* + 이벤트 위임 사용
-    return `<button class="btn-invoice-send" data-action="toggle-send" data-order-num="${escapeHtml(o.orderNum)}" title="발주자에게 전송 / 전송 취소" style="${_style}">${_label}</button>`;
-  })() : '';
+  // [2026-08-31] 정책 변경: 출고확정만으로 발주자한테 명세서 버튼 노출 (sentToCustomer 무관)
+  //   정산 목록에 뜬 order = 이미 status 필터 통과 = 명세서 열람 가능해야 함
+  const canOpenInvoice=canEditSettlement||(currentUser&&o.createdBy===currentUser.id);
+  // [2026-08-31] 정책 변경: 출고확정만으로 발주자 노출 → 별도 [전송] 버튼 무의미 → 제거
+  const sendButton = '';
   const invoiceButton = canOpenInvoice
     ? `<button class="btn-invoice" data-action="open-invoice" data-order-id="${o.id}"><i class="fas fa-file-invoice"></i> 거래명세서</button>`
-    : '<span style="font-size:11px;color:var(--text-3)">미전송</span>';
+    : '<span style="font-size:11px;color:var(--text-3)">-</span>';
   return `
     <tr id="order-row-${o.id}">
       <td><code style="background:#eff6ff;color:#1e40af;padding:2px 6px;border-radius:4px;font-weight:700">${escapeHtml(o.orderNum)}</code></td>
@@ -642,15 +636,8 @@ async function openInvoiceFromSettlement(orderId) {
     else alert('발주서를 찾을 수 없습니다.');
     return;
   }
-  if (typeof isAdmin !== 'function' || !isAdmin()) {
-    const invoices = (typeof DB !== 'undefined' && typeof DB.get === 'function') ? DB.get('invoices', []) : [];
-    const hasSentInvoice = invoices.some(i => i && !i.cancelled && i.orderNum === order.orderNum && i.sentToCustomer);
-    if (!hasSentInvoice) {
-      if (typeof toast === 'function') toast('관리자가 전송한 거래명세서만 볼 수 있습니다.', 'error');
-      else alert('관리자가 전송한 거래명세서만 볼 수 있습니다.');
-      return;
-    }
-  }
+  // [2026-08-31] 정책 변경: 출고확정만으로 발주자한테 명세서 노출 (sentToCustomer 게이트 제거)
+  //   본인 발주 검증은 openFromOrder 내부에서 createdBy 체크
   if (!window.LumaneInvoice || typeof window.LumaneInvoice.openFromOrder !== 'function') {
     if (typeof toast === 'function') toast('거래명세서 모듈 로드 실패. 새로고침 후 다시 시도하세요.', 'error');
     else alert('거래명세서 모듈 로드 실패. 새로고침 후 다시 시도하세요.');

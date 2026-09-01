@@ -1123,10 +1123,12 @@ function renderOrders(){
       const cancelBtn=isAdmin()&&orderListSubTab==='active'?`<button class="btn btn-ghost btn-xs order-cancel-btn" data-order-id="${o.id}" style="color:var(--danger);white-space:nowrap"><i class="fas fa-ban"></i> 발주 취소</button>`:'';
       const uncancelBtn=orderListSubTab==='cancelled'&&(isAdmin()||(currentUser&&o.createdBy===currentUser.id))?`<button class="btn btn-ghost btn-xs order-uncancel-btn" data-order-id="${o.id}" style="color:#16a34a;white-space:nowrap"><i class="fas fa-rotate-left"></i> 취소 되돌리기</button>`:'';
       const reorderBtn=`<button class="btn btn-outline btn-xs reorder-btn" data-order-id="${o.id}" title="이 발주서로 재발주" style="border:1.5px solid #0ea5e9;color:#0369a1;font-weight:700;white-space:nowrap"><i class="fas fa-rotate-right"></i> 재발주</button>`;
-      // 거래명세서 버튼 — 관리자는 항상, 발주자는 sentToCustomer=true 인 경우만
+      // [2026-08-31] 정책 변경: 출고확정만으로 발주자한테 명세서 버튼 노출 (sentToCustomer 무관)
+      //   발주대기 상태는 아직 출고확정 전 → 발주자한테 명세서 안 뜸 (관리자만)
       const _hasSentInv=_sentInvOrderNums.has(o.orderNum);
       const _statusOK=(o.status==='출고완료'||o.status==='발주확정'||o.status==='발주대기');
-      const _canSeeInv=_statusOK && (isAdmin() || (currentUser&&o.createdBy===currentUser.id && _hasSentInv));
+      const _isOrdererVisible=(o.status==='출고완료'||o.status==='발주확정'); // 발주자 노출 = 출고확정 이후만
+      const _canSeeInv=isAdmin()?_statusOK:(_isOrdererVisible && currentUser&&o.createdBy===currentUser.id);
       // [2026-08-03 B8] 관리자에게 검토 대기 명세서 뱃지 표시
       const _needsReview=isAdmin()&&_needsReviewOrderNums.has(o.orderNum);
       const reviewBadge=_needsReview?'<span class="badge" style="margin-left:3px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;font-size:10px;padding:2px 6px" title="수기 편집 명세서에 최신 발주 내용 반영 대기. 명세서 열어 확인·저장 필요"><i class="fas fa-exclamation-triangle"></i> 검토</span>':'';
@@ -1738,9 +1740,12 @@ function openOrderDetail(orderId){
         }
       }).catch(()=>{window._invoicesFetchInflight=false;});
     }
+    // [2026-08-31] 정책 변경: 출고확정만으로 발주자 명세서 버튼 노출 (sentToCustomer 무관)
+    //   발주대기는 관리자만 (발주자한테는 출고확정 후에만)
     const _hasSentInv=_invList.some(i=>i&&!i.cancelled&&i.sentToCustomer&&i.orderNum===order.orderNum);
     const _statusOK=(order.status==='출고완료'||order.status==='발주확정'||order.status==='발주대기');
-    const _canSeeInvDetail=_statusOK&&(isAdmin()||(_isOwner&&_hasSentInv));
+    const _isOrdererVisibleDetail=(order.status==='출고완료'||order.status==='발주확정');
+    const _canSeeInvDetail=isAdmin()?_statusOK:(_isOwner && _isOrdererVisibleDetail);
     if(_canSeeInvDetail){
       const leftBtns=document.querySelector('#order-detail-modal .modal-footer > div');
       if(leftBtns){

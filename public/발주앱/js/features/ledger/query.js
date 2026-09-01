@@ -281,7 +281,15 @@ async function fetchAllInvoices() {
     const allowedOrderNums = new Set(
       allOrders.filter(_canViewLedgerOrder).map(o => o && o.orderNum).filter(Boolean)
     );
-    return list.filter(inv => inv && !inv.cancelled && inv.sentToCustomer && allowedOrderNums.has(inv.orderNum));
+    // [2026-08-31] 정책 변경: 출고확정만으로 발주자한테 원장 표시 (sentToCustomer 요구 제거)
+    //   단 needsManualReview 상태 invoice는 관리자 재검토 대기 → 발주자한테 stale 금액 노출 금지
+    const adminView = (typeof isAdmin === 'function') && isAdmin();
+    return list.filter(inv => {
+      if (!inv || inv.cancelled) return false;
+      if (!allowedOrderNums.has(inv.orderNum)) return false;
+      if (!adminView && inv.needsManualReview) return false;
+      return true;
+    });
   } catch (e) {
     console.warn('[ledger] invoices fetch 실패:', e && e.message);
     return [];

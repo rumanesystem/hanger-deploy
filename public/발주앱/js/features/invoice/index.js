@@ -3,6 +3,35 @@
 // 의존: types.js, utils.js, query.js, render.js, pdf.js, print.js
 // ============================================================
 
+// [2026-08-31] canonical order 조회 헬퍼 — 서버 fresh 우선, 로컬 fallback
+//   목적: 다른 클라이언트 unlock/cancel 후 stale cache 방지
+async function _fetchCanonicalOrder(orderNum) {
+  let _canonical = null;
+  if (window._FS && typeof window._FS.getAllOrders === 'function') {
+    try {
+      const _fresh = await window._FS.getAllOrders({ fromServer: true });
+      if (Array.isArray(_fresh)) _canonical = _fresh.find(o => o && o.orderNum === orderNum) || null;
+    } catch (_e) {}
+  }
+  if (!_canonical) {
+    try {
+      const _localOrders = (typeof DB !== 'undefined' && typeof DB.get === 'function') ? DB.get('orders', []) : [];
+      _canonical = _localOrders.find(o => o && o.orderNum === orderNum) || null;
+    } catch (_e) {}
+  }
+  return _canonical;
+}
+
+// [2026-08-31] 소유권 판정 헬퍼 — settlement/query.js `_canViewSettlementOrder`와 동일 규칙
+//   createdBy 매칭, 없으면 deliveryTo/siteName vs deliveryName/name fallback
+function _isInvoiceOwner(order, user) {
+  if (!order || !user) return false;
+  if (order.createdBy) return order.createdBy === user.id;
+  const deliveryName = String(user.deliveryName || user.name || '').trim();
+  const orderDelivery = String(order.deliveryTo || order.siteName || '').trim();
+  return !!deliveryName && orderDelivery === deliveryName;
+}
+
 async function _openFromOrder(order) {
   // inflight 가드 — 같은 발주서로 더블 클릭 시 중복 invoice 저장 방지
   if (window._invoiceOpenInFlight) return;
@@ -19,24 +48,35 @@ async function _openFromOrder(order) {
     // C1 보강 (Codex): 발주자는 본인 발주서만 접근 — 다른 발주자 명세서 콘솔 우회 차단
     if (!_isAdminUser) {
       const _curId = (typeof currentUser !== 'undefined' && currentUser && currentUser.id) || '';
-      if (!_curId || order.createdBy !== _curId) {
+      if (!_curId) {
         if (typeof toast === 'function') toast('본인이 등록한 발주서만 거래명세서를 조회할 수 있습니다.', 'warning');
         return;
       }
+      // [2026-08-31] Codex 보안 지적: 발주자가 F12로 가짜 order 객체 넘기는 우회 방어
+      //   caller 객체 신뢰 X → orderNum으로 canonical order 재조회 (헬퍼 사용, 서버 fresh 우선)
+      const _canonical = await _fetchCanonicalOrder(order.orderNum);
+      if (!_isInvoiceOwner(_canonical, currentUser)) {
+        if (typeof toast === 'function') toast('본인이 등록한 발주서만 거래명세서를 조회할 수 있습니다.', 'warning');
+        return;
+      }
+      if (_canonical.status !== '발주확정' && _canonical.status !== '출고완료') {
+        if (typeof toast === 'function') toast('아직 출고확정 전인 발주서입니다.', 'warning');
+        return;
+      }
+      order = _canonical; // 이후 로직도 canonical 사용
     }
     // 활성 invoice 찾기 (cancelled 제외)
     const existing = await getInvoicesByOrderNum(order.orderNum);
     const active = (existing || []).filter(i => i && !i.cancelled);
     if (active.length > 0) {
-      // M2 fix: 발주자는 active 중 sentToCustomer=true 인 최신 건 노출 (관리자는 가장 최신)
+      // [2026-08-31] 정책 변경: 출고확정만으로 발주자한테 노출 (sentToCustomer 별도 요구 없음)
+      //   기존: 관리자 [전송] 후에만 발주자 열람 가능 → 신규: 자동 노출 (UX 단순화)
       let target = active[active.length - 1];
-      if (!_isAdminUser) {
-        const sentList = active.filter(i => i.sentToCustomer);
-        if (sentList.length === 0) {
-          if (typeof toast === 'function') toast('아직 거래명세서가 전송되지 않았습니다. 관리자에게 문의하세요.', 'warning');
-          return;
-        }
-        target = sentList[sentList.length - 1];
+      // 예외: needsManualReview 상태(수기편집 후 order 내용 바뀜 → 관리자 재검토 대기)면
+      //   발주자한테 stale 금액 노출 방지. 관리자만 볼 수 있게 유지.
+      if (!_isAdminUser && target.needsManualReview) {
+        if (typeof toast === 'function') toast('명세서가 관리자 재검토 중입니다. 잠시 후 다시 확인해주세요.', 'warning');
+        return;
       }
       if (_isAdminUser && target.needsManualReview && target.pendingAutoDraft) {
         const serverSignature = invoiceContentSignature(target);
@@ -98,27 +138,30 @@ function _safeFileName(name) {
 }
 
 async function _openFromSaved(invoice) {
-  // H2 fix: 발주자 우회 차단 — 미전송/취소 invoice는 발주자가 열 수 없음
+  // H2 fix: 발주자 우회 차단 — 취소 invoice는 발주자가 열 수 없음
+  // [2026-08-31] sentToCustomer 요구 제거 (출고확정 시 자동 노출 정책)
+  //   단 needsManualReview 상태는 관리자 재검토 대기 → 발주자한테 stale 금액 노출 방지
   const _isAdminUser = (typeof isAdmin === 'function') && isAdmin();
   if (!_isAdminUser) {
-    if (!invoice || invoice.cancelled || !invoice.sentToCustomer) {
-      if (typeof toast === 'function') toast('아직 전송되지 않은 거래명세서입니다.', 'warning');
+    if (!invoice || invoice.cancelled) {
+      if (typeof toast === 'function') toast('취소된 거래명세서입니다.', 'warning');
+      return;
+    }
+    if (invoice.needsManualReview) {
+      if (typeof toast === 'function') toast('명세서가 관리자 재검토 중입니다. 잠시 후 다시 확인해주세요.', 'warning');
       return;
     }
     // C1 보강 (Codex): 발주자는 본인 발주서의 invoice만 열람 가능
-    // [2026-08-03 B2] Phase 5 후 DB.get('orders') stale 가능 → 로컬 miss 시 서버 fresh fetch
+    // [2026-08-31] 헬퍼로 통일: canonical order fetch(서버 fresh 우선) + 소유권(legacy fallback 포함)
     try {
-      const _curId = (typeof currentUser !== 'undefined' && currentUser && currentUser.id) || '';
-      let orders = (typeof DB !== 'undefined' && typeof DB.get === 'function') ? DB.get('orders', []) : [];
-      let order = orders.find(o => o && o.orderNum === invoice.orderNum);
-      if (!order && window._FS && typeof window._FS.getAllOrders === 'function') {
-        try {
-          const fresh = await window._FS.getAllOrders({ fromServer: true });
-          if (Array.isArray(fresh)) order = fresh.find(o => o && o.orderNum === invoice.orderNum);
-        } catch (_e2) { /* fresh 실패 → order 미확인 상태 유지 */ }
-      }
-      if (!_curId || !order || order.createdBy !== _curId) {
+      const order = await _fetchCanonicalOrder(invoice.orderNum);
+      if (!_isInvoiceOwner(order, currentUser)) {
         if (typeof toast === 'function') toast('본인이 등록한 발주서만 거래명세서를 조회할 수 있습니다.', 'warning');
+        return;
+      }
+      // 정책: 발주자는 출고확정 이후만 열람 (발주대기 콘솔 우회 방어)
+      if (order.status !== '발주확정' && order.status !== '출고완료') {
+        if (typeof toast === 'function') toast('아직 출고확정 전인 발주서입니다.', 'warning');
         return;
       }
     } catch (_e) {
@@ -243,23 +286,19 @@ function _applyReadonlyMode() {
 }
 
 async function _listInvoices(orderNum) {
-  // Codex 3차 보강: 권한 체크 — 관리자 외에는 본인 발주서 + sentToCustomer만 노출
+  // 권한: 관리자 외에는 본인 발주서만 노출
+  // [2026-08-31] 정책 변경: sentToCustomer 요구 제거 (settlement/orders 화면과 통일)
   const all = await getInvoicesByOrderNum(orderNum);
   const _isAdminUser = (typeof isAdmin === 'function') && isAdmin();
   if (_isAdminUser) return all;
   try {
-    const _curId = (typeof currentUser !== 'undefined' && currentUser && currentUser.id) || '';
-    // [2026-08-03 B2] Phase 5 후 DB.get('orders') stale 가능 → 로컬 miss 시 서버 fresh fetch
-    let orders = (typeof DB !== 'undefined' && typeof DB.get === 'function') ? DB.get('orders', []) : [];
-    let order = orders.find(o => o && o.orderNum === orderNum);
-    if (!order && window._FS && typeof window._FS.getAllOrders === 'function') {
-      try {
-        const fresh = await window._FS.getAllOrders({ fromServer: true });
-        if (Array.isArray(fresh)) order = fresh.find(o => o && o.orderNum === orderNum);
-      } catch (_e2) { /* fresh 실패 → order 미확인 상태 유지 */ }
-    }
-    if (!_curId || !order || order.createdBy !== _curId) return [];
-    return (all || []).filter(i => i && !i.cancelled && i.sentToCustomer);
+    // [2026-08-31] 헬퍼로 통일: canonical order fetch(서버 fresh 우선) + 소유권(legacy fallback 포함)
+    const order = await _fetchCanonicalOrder(orderNum);
+    if (!_isInvoiceOwner(order, currentUser)) return [];
+    // 발주자는 출고확정 이후만 조회 (발주대기 콘솔 우회 방어)
+    if (order.status !== '발주확정' && order.status !== '출고완료') return [];
+    // needsManualReview는 관리자 재검토 대기 → 발주자한테 stale 금액 노출 방지
+    return (all || []).filter(i => i && !i.cancelled && !i.needsManualReview);
   } catch (_e) {
     return [];
   }
@@ -472,9 +511,13 @@ async function _autoCreateForOrder(order, options = {}) {
       const draft = orderToInvoice(freshOrder);
       const zeroItems = findZeroPriceItems(draft);
       if (zeroItems.length > 0) {
+        // [2026-08-31] 재생성 실패 시 이 orderNum의 모든 활성 invoice를 needsManualReview로 마킹
+        //   기존: sentToCustomer:true 만 마킹 → 신규 정책(sentToCustomer 무관)에선 stale 노출 위험
+        //   신규: sent 여부 무관하게 활성 invoice 다 마킹 → 발주자한테 무조건 hidden
         let changed = false;
         const hidden = invoices.map(inv => {
-          if (inv && inv.orderNum === freshOrder.orderNum && !inv.cancelled && inv.sentToCustomer) {
+          if (inv && inv.orderNum === freshOrder.orderNum && !inv.cancelled) {
+            if (inv.needsManualReview) return inv; // 이미 마킹됨
             changed = true;
             return { ...inv, sentToCustomer: false, sentAt: null, needsManualReview: true, autoUpdateError: '단가 미등록', updatedAt: new Date().toISOString() };
           }

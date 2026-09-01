@@ -182,7 +182,10 @@ test.describe("정산 — 정렬 + 검색 회귀", () => {
     expect(result).toBe(true);
   });
 
-  test("R4: orderer settlement hides completed orders until invoice is sent", async ({ page }) => {
+  test("R4: orderer settlement shows completed orders (auto-visible on 출고확정)", async ({ page }) => {
+    // [2026-08-31] 정책 변경: 관리자 [전송] 버튼 없앰 → 출고확정만으로 발주자 정산 자동 노출.
+    //   기존 R4: 명세서 없으면 hidden (expect false)
+    //   신규 R4: 발주확정 상태면 명세서 유무와 무관하게 표시 (expect true)
     await page.evaluate(() => {
       try { (window as any).doLogout && (window as any).doLogout(); } catch (_) {}
     });
@@ -195,8 +198,10 @@ test.describe("정산 — 정렬 + 검색 회귀", () => {
         orderNum: "NO-INVOICE-ORDERER-1",
         deliveryTo: "발주자명세서미전송숨김",
         address: "테스트 주소",
-        orderDate: "2026-07-31",
-        shipDate: "2026-08-01",
+        // [2026-08-31] shipDate과 filter month 일치시켜야 정책 실제 검증됨
+        //   (getSettlementDate 컷오프 2026-09-01 이전 → shipDate 기준 → 7월 fixture)
+        orderDate: "2026-07-15",
+        shipDate: "2026-07-20",
         warehouse: "시흥",
         // [2026-08-31] legacy '출고완료' → 실무 '발주확정'으로 이관 (메모리 규칙 준수)
         status: "발주확정",
@@ -214,6 +219,6 @@ test.describe("정산 — 정렬 + 검색 회귀", () => {
       return rows.some((o: any) => o.orderNum === "NO-INVOICE-ORDERER-1");
     });
 
-    expect(result).toBe(false);
+    expect(result).toBe(true);
   });
 });

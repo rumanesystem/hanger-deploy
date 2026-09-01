@@ -45,14 +45,10 @@ async function fetchCompletedOrders(filter) {
   return allOrders.filter(o => {
     if (!o) return false;
     if (!_canViewSettlementOrder(o)) return false;
-    const adminView = (typeof isAdmin === 'function') && isAdmin();
-    // 관리자 정산: 명세서 자동발급 실패 건도 누락되면 매출이 사라지므로 표시한다.
-    // 발주자 정산: 관리자가 전송한 거래명세서가 있는 건만 표시한다.
-    if (!adminView && (!o.orderNum || !invoiceMap[o.orderNum])) return false;
-    // [2026-08-26] 정책 변경: 발주대기(화면 '출고대기') 제외 → 관리자 '출고 확정' 이후만 정산 편입
-    // 새 구조: 출고완료(=출고확정)만 매출 인식
-    // 기존 운영/테스트 데이터 호환: 예전에는 내부값 '발주확정'을 화면상 출고확정처럼 썼으므로,
-    // 이미 거래명세서가 있는 발주확정 건은 정산에 포함한다.
+    // [2026-08-31] 정책 변경: 출고확정만으로 발주자한테도 정산 표시
+    //   기존엔 관리자가 [전송] 별도 클릭 → 명세서 sentToCustomer:true 되어야 발주자한테 보였음.
+    //   신규: 관리자 [전송] 버튼 없앰. 출고확정 = 곧 발주자한테 노출. UX 단순화.
+    // [2026-08-26] 발주대기(화면 '출고대기') 제외 → 관리자 '출고 확정' 이후만 정산 편입
     if (o.status !== '출고완료' && o.status !== '발주확정') return false;
     const dateField = getSettlementDate(o);
     if (!dateField) return false;
@@ -76,10 +72,14 @@ async function _fetchSettlementInvoiceMap() {
     }
   }
   const map = {};
+  // [2026-08-31] 정책 변경: 발주자에게도 sentToCustomer 무관하게 invoice 금액 반영 (정산 목록 노출과 정합)
+  //   기존: 발주자는 sentToCustomer:true인 invoice 금액만 봄 → 목록엔 있는데 금액이 order 원본
+  //   신규: 활성 invoice 있으면 그 금액 사용 (목록/금액 정책 통일)
+  //   단 needsManualReview 상태 invoice는 관리자 재검토 대기 → 발주자한테 stale 금액 노출 금지
   const adminView = (typeof isAdmin === 'function') && isAdmin();
   (Array.isArray(invoices) ? invoices : []).forEach(inv => {
     if (!inv || !inv.orderNum || inv.cancelled) return;
-    if (!adminView && inv.sentToCustomer !== true) return;
+    if (!adminView && inv.needsManualReview) return;
     map[inv.orderNum] = inv;
   });
   return map;
