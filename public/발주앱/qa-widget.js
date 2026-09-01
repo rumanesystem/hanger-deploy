@@ -123,7 +123,151 @@
 
   // ── 시나리오 (사람이 직접 조작, 위젯은 결과만 검증) ──
   // 🆕 = 오늘 로컬 변경 (아직 배포 X)  |  📦 = 기존 배포 기능 회귀 검증
+  // 🔒 = refactor 브랜치 배포 대기 (9월 예정)
   const SCENARIOS = [
+    // ═══════════════════════════════════════════════
+    // 🔒 refactor 브랜치 (9월 배포 대기) — 로컬 검증 대상
+    // ═══════════════════════════════════════════════
+    {
+      id: 'RB1',
+      badge: '🔒 배포대기',
+      name: '정산·원장에서 출고대기 제외',
+      desc: '출고대기 상태 발주는 정산·원장·명세서에서 안 뜸 (출고확정 이후만 편입)',
+      goto: async () => { document.querySelector('[data-nav="settlement"]')?.click(); },
+      gotoLabel: '정산 탭으로 이동',
+      steps: [
+        '발주자 계정으로 발주서 새로 작성 → 출고대기 상태로 저장',
+        '관리자 로그인 → 정산 탭 → 이번 달 필터',
+        '방금 만든 출고대기 발주가 목록에 안 뜨는지 확인',
+        '그 발주 관리자가 "출고확정" 눌러 상태 변경',
+        '정산 새로고침 → 이제 뜨는지 확인',
+      ],
+      verify: () => ({ ok: true, msg: '수동 확인 — 출고대기 미노출 + 확정 후 노출' })
+    },
+    {
+      id: 'RB2',
+      badge: '🔒 배포대기',
+      name: '정산 정책 A — 출고확정 시점 기준 (9월 이후 발주만)',
+      desc: '2026-09-01 이후 발주는 출고확정 클릭 월 기준으로 정산에 편입. 재확정해도 흔들리지 않음',
+      goto: async () => { document.querySelector('[data-nav="settlement"]')?.click(); },
+      gotoLabel: '정산 탭으로 이동',
+      steps: [
+        '2026-09-15에 발주자가 발주서 작성 (출고일 11월로)',
+        '2026-10-05에 관리자 "출고확정" 클릭',
+        '정산 10월 필터 → 편입 확인 (출고일 11월이어도 확정 월 기준)',
+        '취소 → 되돌리기 → 재확정 여러 번 반복',
+        '정산일이 계속 10월 5일로 고정되는지 확인',
+      ],
+      verify: () => ({ ok: true, msg: '수동 확인 — 확정 월로 편입, 재확정에도 고정' })
+    },
+    {
+      id: 'RB3',
+      badge: '🔒 배포대기',
+      name: '정산 컷오프 — 9월 이전 옛 발주서는 옛 규칙',
+      desc: '2026-08-31 이전 발주는 출고일 기준 유지 (컷오프로 회계 마감 안 흔들림)',
+      goto: async () => { document.querySelector('[data-nav="settlement"]')?.click(); },
+      gotoLabel: '정산 탭으로 이동',
+      steps: [
+        '옛 발주서 (발주일 < 2026-09-01) 선택',
+        '정산 필터 월 → 출고일 기준으로 편입되는지 확인',
+        '(출고확정 시각 기준 아니어야 함)',
+      ],
+      verify: () => ({ ok: true, msg: '수동 확인 — 옛 발주 정산월 예전과 동일' })
+    },
+    {
+      id: 'RB4',
+      badge: '🔒 배포대기',
+      name: '임시저장 분리 — hanger_drafts 컬렉션 (신 저장소)',
+      desc: '임시저장이 orders 대신 hanger_drafts 컬렉션에 저장. 발주번호 미발급',
+      goto: async () => { /* 발주자 로그인 필요 */ },
+      gotoLabel: '',
+      steps: [
+        '발주자 로그인 → 신규 발주서 → 항목 입력 → "임시저장"',
+        'F12 → Console → await window._FS.collectionGet("hanger_drafts")',
+        '→ 배열 반환. 방금 저장한 draft 있는지 확인 (createdBy, draftId 필드)',
+        '발주서 목록에는 안 떠야 함 (임시저장은 목록 제외)',
+        '"불러오기"로 draft 열기 → 항목 복원 확인',
+      ],
+      verify: () => ({ ok: true, msg: '수동 확인 — hanger_drafts에 저장, 발주번호 없음' })
+    },
+    {
+      id: 'RB5',
+      badge: '🔒 배포대기',
+      name: 'draft 승격 원자화 — 두 탭 동시 승격 방어',
+      desc: 'draft 승격 시 삭제+발주생성이 한 tx. 두 탭 동시 승격 시 두 번째만 DRAFT_MISSING',
+      goto: async () => {},
+      gotoLabel: '',
+      steps: [
+        '발주자 로그인 → 발주서 → 임시저장',
+        '탭 두 개 열고 각각 그 draft 편집 → 동시에 "발주넣기" 클릭',
+        '한 탭은 성공, 다른 탭은 "임시저장 사라짐" 토스트',
+        '재고 이중 차감 안 됐는지 확인 (관리자로 재고 확인)',
+      ],
+      verify: () => ({ ok: true, msg: '수동 확인 — 한 탭만 성공, 재고 1회만 차감' })
+    },
+    {
+      id: 'RB6',
+      badge: '🔒 배포대기',
+      name: 'draft 소유자 검증 — 남의 draft 승격 차단',
+      desc: 'draft의 createdBy와 승격 요청자 id가 다르면 DRAFT_OWNER_MISMATCH',
+      goto: async () => {},
+      gotoLabel: '',
+      steps: [
+        '발주자 A로 임시저장',
+        '발주자 B로 로그인',
+        'F12 → window._promotingDraftId = "<A의 draftId>"',
+        'saveOrder(...) 호출',
+        '→ DRAFT_OWNER_MISMATCH 에러로 차단 확인',
+      ],
+      verify: () => ({ ok: true, msg: '수동 확인 — 차단됨, A의 draft·재고 무변화' })
+    },
+    {
+      id: 'RB7',
+      badge: '🔒 배포대기',
+      name: 'toggleOrderLock 원자화 (CAS) — 동시 확정/해제 방어',
+      desc: '두 관리자가 동시에 출고확정/해제 시 CAS로 한 쪽만 성공',
+      goto: async () => { document.querySelector('[data-nav="orders"]')?.click(); },
+      gotoLabel: '발주 목록으로 이동',
+      steps: [
+        '관리자 A/B 두 탭 로그인, 같은 발주서 열기',
+        '동시에 "출고확정" 클릭',
+        '한 쪽은 성공, 다른 쪽은 "이미 상태가 바뀌었습니다" 류 토스트',
+        'F12 → Console: order.isLocked와 status 일관성 확인',
+      ],
+      verify: () => ({ ok: true, msg: '수동 확인 — 한 쪽만 성공, 데이터 일관' })
+    },
+    {
+      id: 'RB8',
+      badge: '🔒 배포대기',
+      name: '대리발주 proxy 필드 방어 — 발주자가 우회 시도 차단',
+      desc: 'payload.proxyOrdererId를 발주자가 넣어도 관리자 아니면 제거됨',
+      goto: async () => {},
+      gotoLabel: '',
+      steps: [
+        '발주자 로그인',
+        'F12 → saveOrder({...payload, proxyOrdererId: "admin"}, "임시저장")',
+        '저장 후 hanger_drafts 조회 → proxyOrdererId 필드 없어야 함',
+        'createdBy가 발주자 자기 id로 저장됐는지 확인',
+      ],
+      verify: () => ({ ok: true, msg: '수동 확인 — proxy 필드 배제, createdBy 정상' })
+    },
+    {
+      id: 'RB9',
+      badge: '🔒 배포대기',
+      name: 'items dual-write — hanger_items 컬렉션 동기화',
+      desc: '품목 편집 시 hanger_data/items 배열 + hanger_items 컬렉션 양쪽 저장',
+      goto: async () => { document.querySelector('[data-nav="items"]')?.click(); },
+      gotoLabel: '품목 관리로 이동',
+      steps: [
+        '아무 품목 활성 토글 (또는 새 품목 추가)',
+        'F12 → Console:',
+        '  await window._FS.collectionGet("hanger_items")',
+        '  → 방금 편집한 품목이 문서로 있는지 확인',
+        '  await window._FS.get("items", {fromServer:true})',
+        '  → 배열에도 동일 반영됐는지 확인',
+      ],
+      verify: () => ({ ok: true, msg: '수동 확인 — 두 저장소 동일 데이터' })
+    },
     // ═══════════════════════════════════════════════
     // 🆕 오늘 변경 (아직 배포 안 됨) — 우선 확인
     // ═══════════════════════════════════════════════
