@@ -270,12 +270,17 @@ function renderCustomerDetailTable(orders) {
 function renderOrderRow(o) {
   const whClass = o.warehouse === '시흥' ? 'badge-wh-siheung' : 'badge-wh-pyeongtaek';
   const canEditSettlement = (typeof isAdmin === 'function') && isAdmin();
-  const activeInvoices=(typeof DB!=='undefined'&&typeof DB.get==='function'?DB.get('invoices',[]):[])
-    .filter(i=>i&&!i.cancelled&&i.orderNum===o.orderNum);
-  const hasSentInvoice=activeInvoices.some(i=>i.sentToCustomer);
   // [2026-08-31] 정책 변경: 출고확정만으로 발주자한테 명세서 버튼 노출 (sentToCustomer 무관)
   //   정산 목록에 뜬 order = 이미 status 필터 통과 = 명세서 열람 가능해야 함
-  const canOpenInvoice=canEditSettlement||(currentUser&&o.createdBy===currentUser.id);
+  // [2026-09-01] legacy fallback 추가 — _canViewSettlementOrder(query.js:98)와 동일 로직.
+  //   createdBy 없는 옛날 발주도 소유자 본인이 [거래명세서] 버튼 사용 가능해야 함.
+  const canOpenInvoice = canEditSettlement || (()=>{
+    if (!currentUser) return false;
+    if (o.createdBy) return o.createdBy === currentUser.id;
+    const deliveryName = String(currentUser.deliveryName || currentUser.name || '').trim();
+    const orderDelivery = String(o.deliveryTo || o.siteName || '').trim();
+    return !!deliveryName && orderDelivery === deliveryName;
+  })();
   // [2026-08-31] 정책 변경: 출고확정만으로 발주자 노출 → 별도 [전송] 버튼 무의미 → 제거
   const sendButton = '';
   const invoiceButton = canOpenInvoice
@@ -313,8 +318,6 @@ if (typeof document !== 'undefined' && !document._settlementBtnDelegated) {
     const action = btn.dataset.action;
     if (action === 'open-invoice' && typeof openInvoiceFromSettlement === 'function') {
       openInvoiceFromSettlement(Number(btn.dataset.orderId));
-    } else if (action === 'toggle-send' && typeof toggleInvoiceSendFromSettlement === 'function') {
-      toggleInvoiceSendFromSettlement(btn.dataset.orderNum, btn);
     } else if (action === 'inline-edit' && typeof startInlineEdit === 'function') {
       startInlineEdit(Number(btn.dataset.orderId));
     } else if (action === 'goto-order' && typeof goToOrder === 'function') {
@@ -646,53 +649,9 @@ async function openInvoiceFromSettlement(orderId) {
   await window.LumaneInvoice.openFromOrder(order);
 }
 
-/**
- * 발주자 전송 토글 — 현재 상태 페치 후 반전
- * 버튼 라벨/색을 갱신해서 시각적 피드백
- * @param {string} orderNum
- * @param {HTMLElement} btn
- */
-async function toggleInvoiceSendFromSettlement(orderNum, btn) {
-  // H1 fix: 관리자 권한 가드 — 발주자가 콘솔에서 호출해 전송 상태 조작하는 것 차단
-  if (typeof isAdmin !== 'function' || !isAdmin()) {
-    if (typeof toast === 'function') toast('권한이 없습니다.', 'error');
-    return;
-  }
-  if (!window.LumaneInvoice || typeof window.LumaneInvoice.setSentByOrderNum !== 'function') {
-    if (typeof toast === 'function') toast('거래명세서 모듈 로드 실패.', 'error');
-    return;
-  }
-  // H3 fix: 전역 inflight 가드 — 빠른 더블클릭으로 sentToCustomer 두 번 토글되는 race 방지
-  if (window._invoiceSendInflight) return;
-  if (btn.disabled) return;
-  window._invoiceSendInflight = true;
-  btn.disabled = true;
-  try {
-    const list = await window.LumaneInvoice.list(orderNum);
-    const active = (list || []).filter(i => i && !i.cancelled);
-    if (active.length === 0) {
-      if (typeof toast === 'function') toast('발급된 거래명세서가 없습니다. 먼저 발급해주세요.', 'warning');
-      return;
-    }
-    const latest = active[active.length - 1];
-    const nextSent = !latest.sentToCustomer;
-    const confirmMsg = nextSent
-      ? '발주자에게 거래명세서를 전송하시겠습니까?'
-      : '전송을 취소하시겠습니까? (발주자가 더 이상 볼 수 없습니다)';
-    if (!confirm(confirmMsg)) return;
-    const r = await window.LumaneInvoice.setSentByOrderNum(orderNum, nextSent);
-    if (r.updated > 0) {
-      btn.innerHTML = nextSent
-        ? '<i class="fas fa-check-circle"></i> 전송됨'
-        : '<i class="fas fa-paper-plane"></i> 전송';
-      btn.style.background = nextSent ? '#16a34a' : '#fff';
-      btn.style.color = nextSent ? '#fff' : '#16a34a';
-    }
-  } finally {
-    window._invoiceSendInflight = false;
-    btn.disabled = false;
-  }
-}
+// [2026-09-01] toggleInvoiceSendFromSettlement 제거 —
+//   전송 버튼 자체가 render에서 사라지고 (sendButton=''), 이벤트 위임의
+//   'toggle-send' 분기도 삭제됨. 이제 도달 불가능한 함수라 삭제.
 
 async function exportExcel() {
   if (typeof isAdmin !== 'function' || !isAdmin()) {

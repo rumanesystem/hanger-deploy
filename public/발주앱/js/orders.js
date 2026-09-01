@@ -1101,11 +1101,9 @@ function renderOrders(){
         }
       }).catch(()=>{window._invoicesFetchInflight=false;});
     }
-    const _sentInvOrderNums=new Set();
     // [2026-08-03 B8] 검토 대기 명세서 orderNum 추적 → 목록 뱃지로 표시
     const _needsReviewOrderNums=new Set();
     _invList.forEach(i=>{
-      if(i&&!i.cancelled&&i.sentToCustomer&&i.orderNum)_sentInvOrderNums.add(i.orderNum);
       if(i&&!i.cancelled&&i.needsManualReview&&i.orderNum)_needsReviewOrderNums.add(i.orderNum);
     });
     rows=`<div class="table-wrap"><table><thead><tr><th>납품처</th><th>시공주소</th><th>발주번호</th><th>발주일</th><th>출고일</th><th class="td-center">상태</th><th class="td-center">등록일</th>${orderListSubTab==='cancelled'?'<th>취소 사유</th>':''}${(isAdmin()||orderListSubTab==='cancelled')?'<th class="td-center">관리</th>':''}</tr></thead><tbody>
@@ -1125,7 +1123,6 @@ function renderOrders(){
       const reorderBtn=`<button class="btn btn-outline btn-xs reorder-btn" data-order-id="${o.id}" title="이 발주서로 재발주" style="border:1.5px solid #0ea5e9;color:#0369a1;font-weight:700;white-space:nowrap"><i class="fas fa-rotate-right"></i> 재발주</button>`;
       // [2026-08-31] 정책 변경: 출고확정만으로 발주자한테 명세서 버튼 노출 (sentToCustomer 무관)
       //   발주대기 상태는 아직 출고확정 전 → 발주자한테 명세서 안 뜸 (관리자만)
-      const _hasSentInv=_sentInvOrderNums.has(o.orderNum);
       const _statusOK=(o.status==='출고완료'||o.status==='발주확정'||o.status==='발주대기');
       const _isOrdererVisible=(o.status==='출고완료'||o.status==='발주확정'); // 발주자 노출 = 출고확정 이후만
       const _canSeeInv=isAdmin()?_statusOK:(_isOrdererVisible && currentUser&&o.createdBy===currentUser.id);
@@ -1742,7 +1739,6 @@ function openOrderDetail(orderId){
     }
     // [2026-08-31] 정책 변경: 출고확정만으로 발주자 명세서 버튼 노출 (sentToCustomer 무관)
     //   발주대기는 관리자만 (발주자한테는 출고확정 후에만)
-    const _hasSentInv=_invList.some(i=>i&&!i.cancelled&&i.sentToCustomer&&i.orderNum===order.orderNum);
     const _statusOK=(order.status==='출고완료'||order.status==='발주확정'||order.status==='발주대기');
     const _isOrdererVisibleDetail=(order.status==='출고완료'||order.status==='발주확정');
     const _canSeeInvDetail=isAdmin()?_statusOK:(_isOwner && _isOrdererVisibleDetail);
