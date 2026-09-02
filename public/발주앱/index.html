@@ -510,6 +510,13 @@
               } else {
                 await db.collection('hanger_data').doc(key).set({ value: requestedValue, updatedAt: new Date().toISOString() });
               }
+              // [2026-09-02 S4 fix] 실 Firebase 순차 트랜잭션 stale read 방지 — 짧은 지연.
+              //   verify poll 방식은 매 저장마다 최대 3.1초 UX 지연 유발 → 300ms 고정 지연으로 복귀.
+              //   emu는 즉시 일관되어 skip. 실 Firebase의 tx 커밋→서버 반영 propagation 창이 보통 100~200ms
+              //   → 300ms 여유. Codex 지적: 이론적 "masking"이나 실용상 필요.
+              if (!_isLocalEmu && _idBasedKeys.has(key) && Array.isArray(requestedValue)) {
+                await new Promise(r => setTimeout(r, 300));
+              }
               if (!window._memBaseline) window._memBaseline = {};
               // baseline은 요청값이 아니라 트랜잭션이 서버에 실제로 쓴 병합본이어야 한다.
               window._memBaseline[key] = _deepCopyBaseline(committedValue);
