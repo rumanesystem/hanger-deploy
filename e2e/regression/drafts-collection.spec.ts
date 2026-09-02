@@ -10,8 +10,12 @@ import { resetAndSeed } from "../helpers/emu-reset";
 
 test.setTimeout(90_000);
 
-const FIRESTORE_HOST = "http://localhost:18080";
-const PROJECT_ID = "tooktakproject";
+// [2026-09-02] 스테이징/로컬 자동 판별: env STAGING_FIRESTORE_URL 있으면 스테이징 모드
+const IS_STAGING = !!process.env.STAGING_FIRESTORE_URL;
+const FIRESTORE_HOST = IS_STAGING
+  ? "https://firestore.googleapis.com"
+  : "http://localhost:18080";
+const PROJECT_ID = IS_STAGING ? "hanger-test-260901" : "tooktakproject";
 
 async function waitForAppReady(page: Page) {
   await page.waitForSelector("#login-screen", { state: "visible", timeout: 15000 });

@@ -11,8 +11,10 @@ import { resetAndSeed } from "../helpers/emu-reset";
 
 test.setTimeout(60_000);
 
-const PROJECT_ID = "tooktakproject";
-const FIRESTORE_HOST = "http://localhost:18080";
+// [2026-09-02] 스테이징/로컬 자동 판별
+const IS_STAGING = !!process.env.STAGING_FIRESTORE_URL;
+const PROJECT_ID = IS_STAGING ? "hanger-test-260901" : "tooktakproject";
+const FIRESTORE_HOST = IS_STAGING ? "https://firestore.googleapis.com" : "http://localhost:18080";
 
 async function getDoc(request, id: string | number) {
   const url = `${FIRESTORE_HOST}/v1/projects/${PROJECT_ID}/databases/(default)/documents/hanger_items/${id}`;

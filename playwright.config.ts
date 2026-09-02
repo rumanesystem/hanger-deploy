@@ -11,7 +11,11 @@ const RUN_OPTIN = process.env.RUN_OPTIN === "1";
 
 export default defineConfig({
   testDir: "./e2e",
-  ...(RUN_OPTIN ? {} : { testIgnore: ["**/_*.spec.ts"] }),
+  // [P1 fix codex 2026-09-02] staging/ 폴더는 스테이징 전용 config로만 실행 — 로컬 기본 러너에서 제외
+  //   staging spec top-level에 STAGING_API_KEY 검증 throw가 있어서 로컬 collection도 중단됨
+  ...(RUN_OPTIN
+    ? { testIgnore: ["e2e/staging/**"] }
+    : { testIgnore: ["**/_*.spec.ts", "e2e/staging/**"] }),
   timeout: 30_000,
   fullyParallel: false,
   workers: 1,

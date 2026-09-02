@@ -22,8 +22,10 @@ import path from "path";
 const ORDERER1_DELIVERY = "원장테스트상사"; // seed-ledger-print-test.js 발주자1
 const ORDERER2_DELIVERY = "남다른디자인"; // seed-ledger-print-test.js 발주자2
 
-test.beforeAll(() => {
-  // 로컬 계정·데이터 시드 (docker 로컬 DB)
+test.beforeAll(({ }, testInfo) => {
+  // 로컬 emu 대상일 때만 로컬 시드 실행. 스테이징(실 Firebase) 대상이면 스킵.
+  const baseURL = testInfo.project.use.baseURL || "";
+  if (!baseURL.includes("localhost")) return; // 스테이징/운영이면 시드 스크립트 안 돌림
   const seedPath = path.resolve(__dirname, "..", "..", "functions", "seed-ledger-print-test.js");
   execSync(`node "${seedPath}"`, {
     stdio: "pipe",
@@ -258,6 +260,9 @@ test.describe("[2026-09-01] 명세서 자동 노출 정책 — UI 검증", () =>
 
   test("B2. 관리자 발주목록 → 발주대기 발주에도 [거래명세서] 버튼 노출 (관리자 skip)", async ({ page }) => {
     await loginAsAdmin(page);
+    // navigate 먼저 (loadOrders 완료 후 inject해야 스테이징에서 안 지워짐)
+    await page.evaluate(() => (window as any).navigate("orders"));
+    await page.waitForTimeout(1000);
     await injectOrder(page, {
       id: 99003,
       orderNum: "TEST-B2-003",
@@ -272,12 +277,14 @@ test.describe("[2026-09-01] 명세서 자동 노출 정책 — UI 검증", () =>
       totalVat: 1000,
       totalAmount: 11000,
     });
-    await page.evaluate(() => (window as any).navigate("orders"));
-    await page.waitForTimeout(500);
+    // inject 이후 DB에 실제로 존재하는지 waitForFunction으로 확인
+    await page.waitForFunction((on) => {
+      const w = window as any;
+      const orders = w.DB && typeof w.DB.get === "function" ? w.DB.get("orders", []) : [];
+      return Array.isArray(orders) && orders.some((x: any) => x && x.orderNum === on);
+    }, "TEST-B2-003", { timeout: 8_000 });
 
-    // 관리자 발주 목록에서 orderNum row 찾고 invoice-btn 존재 확인
     const invoiceBtnCount = await page.evaluate((on) => {
-      // orders.js:1128 _canSeeInv 로직: isAdmin() -> _statusOK (발주대기 포함)
       const w = window as any;
       const isAdm = typeof w.isAdmin === "function" && w.isAdmin();
       const o = w.DB.get("orders", []).find((x: any) => x.orderNum === on);

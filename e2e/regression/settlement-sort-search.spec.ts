@@ -2,7 +2,9 @@ import { test, expect, Page } from "@playwright/test";
 import { execSync } from "child_process";
 import path from "path";
 
-test.beforeAll(() => {
+test.beforeAll(({ }, testInfo) => {
+  const baseURL = testInfo.project.use.baseURL || "";
+  if (!baseURL.includes("localhost")) return; // 스테이징/운영이면 로컬 시드 스킵
   const seedPath = path.resolve(__dirname, "..", "..", "functions", "seed-ledger-print-test.js");
   execSync(`node "${seedPath}"`, {
     stdio: "pipe",
