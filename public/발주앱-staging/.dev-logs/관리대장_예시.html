@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<title>거래처 관리대장 예시</title>
+<style>
+  :root {
+    --bg: #f3f4f6;
+    --border: #d1d5db;
+    --r: 8px;
+    --r-sm: 6px;
+    --text: #111827;
+    --text-2: #374151;
+    --text-3: #6b7280;
+  }
+  body { background: var(--bg); padding: 24px; max-width: 1280px; margin: 0 auto; font-family: 'Pretendard', 'Apple SD Gothic Neo', -apple-system, sans-serif; color: var(--text); }
+  .ec-print-area { background: #fff; padding: 28px 36px; border: 1px solid var(--border); border-radius: var(--r); }
+  .ec-doc-title { text-align: center; font-size: 22px; font-weight: 800; margin-bottom: 6px; letter-spacing: -0.5px; }
+  .ec-doc-title-sub { font-weight: 600; font-size: 14px; }
+  .ec-meta { display: flex; justify-content: space-between; align-items: end; margin: 14px 0 8px; font-size: 12px; }
+  .ec-meta-left { color: var(--text); font-weight: 600; }
+  .ec-meta-right { color: var(--text-2); }
+  .ec-info-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 14px; border-top: 1.5px solid #94a3b8; border-bottom: 1.5px solid #94a3b8; }
+  .ec-info-table th, .ec-info-table td { padding: 7px 12px; border: 1px solid #cbd5e1; }
+  .ec-info-table th { background: #f8fafc; font-weight: 700; color: var(--text-2); width: 110px; text-align: left; }
+  .ec-info-table td { color: var(--text); }
+
+  .ec-ledger-title { background: #e0f2fe; text-align: center; font-weight: 800; font-size: 13px; padding: 7px; border: 1px solid #94a3b8; border-bottom: none; }
+  .ec-ledger { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .ec-ledger th, .ec-ledger td { border: 1px solid #cbd5e1; padding: 6px 10px; }
+  .ec-ledger thead th { background: #f1f5f9; font-weight: 700; color: var(--text); text-align: center; }
+  .ec-ledger td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .ec-ledger td.date { width: 100px; white-space: nowrap; }
+
+  .ec-row-header { background: #f8fafc; font-weight: 700; }
+  .ec-row-header td { background: #f8fafc; }
+  .ec-row-item td { padding-left: 24px; color: var(--text-2); background: #fef2f2; }
+  .ec-row-item td.num { background: #fef2f2; }
+  .ec-row-payment td { background: #f0fdf4; }
+  .ec-row-carry { background: #fffbeb; font-weight: 700; }
+  .ec-row-carry td { background: #fffbeb; }
+  .ec-row-month-sum td { background: #dbeafe; font-weight: 800; text-align: center; }
+  .ec-row-grand-sum td { background: #bfdbfe; font-weight: 800; text-align: center; }
+
+  .ec-print-footer { text-align: right; font-size: 11px; color: var(--text-3); margin-top: 10px; }
+
+  @media print {
+    body { background: #fff; padding: 0; max-width: none; }
+    .ec-print-area { border: none; padding: 0; }
+    .ec-ledger { font-size: 11px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="ec-print-area">
+  <div class="ec-doc-title">
+    <span>해피홈인테리어</span> 관리대장
+  </div>
+
+  <div class="ec-meta">
+    <div class="ec-meta-left">회사명 : 루마네시스템</div>
+    <div class="ec-meta-right">2026/05/01 ~ 2026/06/30</div>
+  </div>
+
+  <table class="ec-info-table">
+    <tbody>
+      <tr>
+        <th>사업자등록번호</th><td>123-45-67890</td>
+        <th>대표자</th><td>김행복</td>
+      </tr>
+      <tr>
+        <th>여신한도</th><td>5,000,000</td>
+        <th>전화</th><td>(모바일 : 010-1234-5678)</td>
+      </tr>
+      <tr>
+        <th>Email</th><td>happy@example.com</td>
+        <th>Fax</th><td>02-1234-5679</td>
+      </tr>
+      <tr>
+        <th>주 소</th><td colspan="3">서울특별시 강남구 테헤란로 123, 5층</td>
+      </tr>
+      <tr>
+        <th>적 요</th><td colspan="3">월말 정산 거래처 / 시공 현장 다수</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="ec-ledger-title">판매/수금내역</div>
+  <table class="ec-ledger">
+    <thead>
+      <tr>
+        <th style="width:100px">일자</th>
+        <th>적요</th>
+        <th class="num" style="width:110px">판매</th>
+        <th class="num" style="width:110px">수금</th>
+        <th class="num" style="width:110px">잔액</th>
+      </tr>
+    </thead>
+    <tbody>
+      <!-- 이월잔액 -->
+      <tr class="ec-row-carry">
+        <td></td>
+        <td style="text-align:center">이월잔액</td>
+        <td class="num"></td>
+        <td class="num"></td>
+        <td class="num">₩1,250,000</td>
+      </tr>
+
+      <!-- 5월 거래 1 -->
+      <tr class="ec-row-header">
+        <td class="date">2026/05/03 -1</td>
+        <td>20260503-001 (101동 503호 시공)</td>
+        <td class="num">₩1,820,400</td>
+        <td class="num"></td>
+        <td class="num">₩3,070,400</td>
+      </tr>
+      <tr class="ec-row-item">
+        <td></td>
+        <td>포스트바 2250 [화이트] / 12 * ₩11,000</td>
+        <td class="num">₩145,200</td>
+        <td class="num"></td>
+        <td class="num"></td>
+      </tr>
+      <tr class="ec-row-item">
+        <td></td>
+        <td>선반바(ABS) 400 [화이트] / 28 * ₩2,100</td>
+        <td class="num">₩64,680</td>
+        <td class="num"></td>
+        <td class="num"></td>
+      </tr>
+      <tr class="ec-row-item">
+        <td></td>
+        <td>선반 [솔리드 770mm] / 16 * ₩5,300</td>
+        <td class="num">₩93,280</td>
+        <td class="num"></td>
+        <td class="num"></td>
+      </tr>
+      <tr class="ec-row-item">
+        <td></td>
+        <td>겉서랍 3단 [솔리드] / 2 * ₩92,000</td>
+        <td class="num">₩202,400</td>
+        <td class="num"></td>
+        <td class="num"></td>
+      </tr>
+
+      <!-- 5월 거래 2 -->
+      <tr class="ec-row-header">
+        <td class="date">2026/05/15 -1</td>
+        <td>20260515-002 (303동 1204호 시공)</td>
+        <td class="num">₩968,000</td>
+        <td class="num"></td>
+        <td class="num">₩4,038,400</td>
+      </tr>
+      <tr class="ec-row-item">
+        <td></td>
+        <td>포스트바 2250 [스톤그레이] / 8 * ₩11,000</td>
+        <td class="num">₩96,800</td>
+        <td class="num"></td>
+        <td class="num"></td>
+      </tr>
+      <tr class="ec-row-item">
+        <td></td>
+        <td>선반 [스톤그레이 570mm] / 12 * ₩4,200</td>
+        <td class="num">₩55,440</td>
+        <td class="num"></td>
+        <td class="num"></td>
+      </tr>
+      <tr class="ec-row-item">
+        <td></td>
+        <td>코너선반 [스톤그레이 730×570] / 4 * ₩13,000</td>
+        <td class="num">₩57,200</td>
+        <td class="num"></td>
+        <td class="num"></td>
+      </tr>
+
+      <!-- 5월 입금 -->
+      <tr class="ec-row-payment">
+        <td class="date">2026/05/20</td>
+        <td>5월 1차 정산 (계좌이체)</td>
+        <td class="num"></td>
+        <td class="num">₩2,500,000</td>
+        <td class="num">₩1,538,400</td>
+      </tr>
+
+      <!-- 5월 거래 3 -->
+      <tr class="ec-row-header">
+        <td class="date">2026/05/28 -1</td>
+        <td>20260528-001 (505동 802호 시공)</td>
+        <td class="num">₩1,432,200</td>
+        <td class="num"></td>
+        <td class="num">₩2,970,600</td>
+      </tr>
+      <tr class="ec-row-item">
+        <td></td>
+        <td>포스트바 2250 [화이트] / 10 * ₩11,000</td>
+        <td class="num">₩121,000</td>
+        <td class="num"></td>
+        <td class="num"></td>
+      </tr>
+      <tr class="ec-row-item">
+        <td></td>
+        <td>선반바(ABS) 400 [화이트] / 24 * ₩2,100</td>
+        <td class="num">₩55,440</td>
+        <td class="num"></td>
+        <td class="num"></td>
+      </tr>
+      <tr class="ec-row-item">
+        <td></td>
+        <td>거울장 목대 [솔리드] / 1 * ₩87,000</td>
+        <td class="num">₩95,700</td>
+        <td class="num"></td>
+        <td class="num"></td>
+      </tr>
+
+      <!-- 5월 합계 -->
+      <tr class="ec-row-month-sum">
+        <td colspan="2">2026년 05월 계</td>
+        <td class="num">₩4,220,600</td>
+        <td class="num">₩2,500,000</td>
+        <td class="num"></td>
+      </tr>
+
+      <!-- 6월 거래 1 -->
+      <tr class="ec-row-header">
+        <td class="date">2026/06/05 -1</td>
+        <td>20260605-001 (107동 1009호 시공)</td>
+        <td class="num">₩2,142,580</td>
+        <td class="num"></td>
+        <td class="num">₩5,113,180</td>
+      </tr>
+      <tr class="ec-row-item">
+        <td></td>
+        <td>포스트바 2250 [화이트] / 14 * ₩11,000</td>
+        <td class="num">₩169,400</td>
+        <td class="num"></td>
+        <td class="num"></td>
+      </tr>
+      <tr class="ec-row-item">
+        <td></td>
+        <td>선반바(ABS) 400 [화이트] / 36 * ₩2,100</td>
+        <td class="num">₩83,160</td>
+        <td class="num"></td>
+        <td class="num"></td>
+      </tr>
+      <tr class="ec-row-item">
+        <td></td>
+        <td>선반 [솔리드 770mm] / 20 * ₩5,300</td>
+        <td class="num">₩116,600</td>
+        <td class="num"></td>
+        <td class="num"></td>
+      </tr>
+      <tr class="ec-row-item">
+        <td></td>
+        <td>겉서랍 4단 [솔리드] / 2 * ₩139,000</td>
+        <td class="num">₩305,800</td>
+        <td class="num"></td>
+        <td class="num"></td>
+      </tr>
+
+      <!-- 6월 입금 -->
+      <tr class="ec-row-payment">
+        <td class="date">2026/06/10</td>
+        <td>6월 1차 정산 (계좌이체)</td>
+        <td class="num"></td>
+        <td class="num">₩3,000,000</td>
+        <td class="num">₩2,113,180</td>
+      </tr>
+
+      <!-- 6월 거래 2 -->
+      <tr class="ec-row-header">
+        <td class="date">2026/06/18 -1</td>
+        <td>20260618-001 (901동 1701호 시공)</td>
+        <td class="num">₩1,524,600</td>
+        <td class="num"></td>
+        <td class="num">₩3,637,780</td>
+      </tr>
+      <tr class="ec-row-item">
+        <td></td>
+        <td>포스트바 2250 [블랙] / 12 * ₩11,000</td>
+        <td class="num">₩145,200</td>
+        <td class="num"></td>
+        <td class="num"></td>
+      </tr>
+      <tr class="ec-row-item">
+        <td></td>
+        <td>선반바(ABS) 400 [블랙] / 30 * ₩2,100</td>
+        <td class="num">₩69,300</td>
+        <td class="num"></td>
+        <td class="num"></td>
+      </tr>
+      <tr class="ec-row-item">
+        <td></td>
+        <td>겉서랍 2단 [솔리드] / 2 * ₩69,000</td>
+        <td class="num">₩151,800</td>
+        <td class="num"></td>
+        <td class="num"></td>
+      </tr>
+
+      <!-- 6월 입금 2 -->
+      <tr class="ec-row-payment">
+        <td class="date">2026/06/25</td>
+        <td>6월 2차 정산 (계좌이체)</td>
+        <td class="num"></td>
+        <td class="num">₩2,000,000</td>
+        <td class="num">₩1,637,780</td>
+      </tr>
+
+      <!-- 6월 합계 -->
+      <tr class="ec-row-month-sum">
+        <td colspan="2">2026년 06월 계</td>
+        <td class="num">₩3,667,180</td>
+        <td class="num">₩5,000,000</td>
+        <td class="num"></td>
+      </tr>
+
+      <!-- 누계 -->
+      <tr class="ec-row-grand-sum">
+        <td colspan="2">누 계 (이월잔액 ₩1,250,000 + 기간 거래)</td>
+        <td class="num">₩7,887,780</td>
+        <td class="num">₩7,500,000</td>
+        <td class="num">₩1,637,780</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="ec-print-footer">출력일시 : 2026/06/12 오후 3:25:00</div>
+</div>
+
+</body>
+</html>

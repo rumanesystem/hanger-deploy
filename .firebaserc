@@ -1,6 +1,7 @@
 {
   "projects": {
-    "default": "tooktakproject"
+    "default": "tooktakproject",
+    "staging": "hanger-test-260901"
   },
   "targets": {
     "tooktakproject": {
@@ -11,6 +12,11 @@
     "demo-hanger": {
       "hosting": {
         "hanger": ["hanger-deploy"]
+      }
+    },
+    "hanger-test-260901": {
+      "hosting": {
+        "hanger-staging": ["hanger-test-260901"]
       }
     }
   }

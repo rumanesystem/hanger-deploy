@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>발주서 저장 방식 바꾸기 — 쉬운 설명</title>
+<style>
+  @media print { body { padding: 20mm; } .no-print { display: none; } }
+  body {
+    font-family: "Pretendard", -apple-system, "Malgun Gothic", sans-serif;
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 40px 30px;
+    background: #fff;
+    color: #1f2937;
+    line-height: 1.8;
+    font-size: 15px;
+  }
+  h1 {
+    font-size: 26px;
+    color: #1e3a8a;
+    border-bottom: 3px solid #1e3a8a;
+    padding-bottom: 12px;
+  }
+  .subtitle {
+    color: #6b7280;
+    font-size: 14px;
+    margin-bottom: 30px;
+  }
+  h2 {
+    font-size: 20px;
+    color: #1e40af;
+    margin-top: 40px;
+    padding-bottom: 6px;
+    border-bottom: 2px solid #bfdbfe;
+  }
+  h3 { font-size: 16px; margin-top: 24px; color: #111827; }
+  p { margin: 10px 0; }
+  ul, ol { margin: 10px 0; padding-left: 28px; }
+  li { margin: 6px 0; }
+  .compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 20px 0;
+  }
+  .compare-box {
+    border-radius: 8px;
+    padding: 16px 18px;
+  }
+  .compare-box.bad {
+    background: #fef2f2;
+    border-left: 4px solid #dc2626;
+  }
+  .compare-box.good {
+    background: #f0fdf4;
+    border-left: 4px solid #16a34a;
+  }
+  .compare-box h4 { margin: 0 0 10px 0; font-size: 14px; }
+  .compare-box.bad h4 { color: #991b1b; }
+  .compare-box.good h4 { color: #15803d; }
+  .box {
+    background: #fffbeb;
+    border-left: 4px solid #f59e0b;
+    padding: 14px 18px;
+    margin: 18px 0;
+    border-radius: 6px;
+  }
+  .box-info {
+    background: #eff6ff;
+    border-left-color: #3b82f6;
+  }
+  .timeline-box {
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin: 12px 0;
+  }
+  .timeline-box .step {
+    display: inline-block;
+    background: #1e40af;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 3px 12px;
+    border-radius: 20px;
+    margin-right: 10px;
+  }
+  .timeline-box.now .step { background: #dc2626; }
+  .timeline-box.wait .step { background: #f59e0b; }
+  .timeline-box.done .step { background: #16a34a; }
+  .timeline-box h4 { display: inline-block; margin: 0; font-size: 15px; }
+  .timeline-box .time { color: #6b7280; font-size: 13px; margin-top: 6px; }
+  .timeline-box .desc { margin-top: 8px; color: #374151; }
+  .meta {
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin-bottom: 24px;
+    font-size: 13px;
+  }
+  .meta div { margin: 4px 0; }
+  .meta dt { display: inline-block; min-width: 90px; color: #6b7280; font-weight: 600; }
+  .btn-print {
+    background: #1e3a8a;
+    color: #fff;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 700;
+    margin-bottom: 20px;
+    font-size: 14px;
+  }
+  .btn-print:hover { background: #1e40af; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 14px;
+  }
+  th, td {
+    border: 1px solid #e5e7eb;
+    padding: 10px 14px;
+    text-align: left;
+  }
+  th { background: #f9fafb; }
+  .emoji { font-size: 18px; margin-right: 4px; }
+</style>
+</head>
+<body>
+
+<button class="btn-print no-print" onclick="window.print()">🖨️ 인쇄 / PDF 저장</button>
+
+<h1>발주서 저장 방식 바꾸기</h1>
+<p class="subtitle">왜 바꿔야 하는지, 어떻게 바꾸는지 쉬운 설명</p>
+
+<div class="meta">
+  <div><dt>작성일</dt><dd>2026-06-11</dd></div>
+  <div><dt>총 작업 기간</dt><dd>약 2주</dd></div>
+  <div><dt>실제 코딩 시간</dt><dd>약 16시간 (중간 검증 1주 포함)</dd></div>
+</div>
+
+<h2>1. 비유로 이해하기</h2>
+
+<h3>지금 상황 = 큰 장부책 한 권</h3>
+<p>발주서 222건이 <strong>큰 장부책 한 권에 통째로</strong> 적혀 있어요.</p>
+
+<div class="compare">
+  <div class="compare-box bad">
+    <h4>📕 현재 (장부책 1권)</h4>
+    <ul style="margin:0; padding-left:20px">
+      <li>발주서 1건 고치려면 → 장부책 통째로 가져가야 함</li>
+      <li>두 사람이 동시에 가져가면 → 누구 게 최신인지 모름</li>
+      <li>한 사람이 통째로 다시 갖다 놓을 때 → 다른 사람이 적은 거 지워짐</li>
+      <li><strong>그래서 발주서가 사라짐 (6/8 사고)</strong></li>
+    </ul>
+  </div>
+  <div class="compare-box good">
+    <h4>📑 변경 후 (낱장 카드)</h4>
+    <ul style="margin:0; padding-left:20px">
+      <li>발주서 1건 = 카드 1장</li>
+      <li>1건 고치려면 → 그 카드 1장만 꺼내면 됨</li>
+      <li>두 사람이 다른 카드 동시에 꺼내도 → 충돌 없음</li>
+      <li><strong>발주서 사라질 일 없음</strong></li>
+    </ul>
+  </div>
+</div>
+
+<h2>2. 지금 왜 자꾸 발주서가 사라지나</h2>
+
+<p>지금까지 발생한 일들:</p>
+
+<table>
+<thead><tr><th>날짜</th><th>일어난 일</th></tr></thead>
+<tbody>
+<tr><td>6/8</td><td>발주서 3건 사라짐 (백업에서 복구)</td></tr>
+<tr><td>6/9</td><td>발주서 008 사라짐 (백업에서 복구)</td></tr>
+<tr><td>6/11</td><td>여러 안전장치 추가했지만 근본 원인은 그대로</td></tr>
+</tbody>
+</table>
+
+<div class="box">
+<strong>핵심:</strong> 안전장치를 아무리 추가해도 <strong>"장부책 한 권" 구조 자체가 안 바뀌면 비슷한 사고가 또 일어날 수 있어요.</strong>
+</div>
+
+<h2>3. 어떻게 바꾸나</h2>
+
+<h3>요약</h3>
+<p>모든 발주서를 한 곳에 몰아넣은 큰 장부책 → 발주서별로 따로 보관하는 카드함으로 바꾸는 거예요.</p>
+
+<h3>일하는 사람이 느끼는 변화</h3>
+<table>
+<thead><tr><th>지금</th><th>바뀐 뒤</th></tr></thead>
+<tbody>
+<tr><td>발주서 사라지는 사고 가끔 발생</td><td>거의 발생 안 함</td></tr>
+<tr><td>발주서 동시 작업 시 충돌 위험</td><td>각자 다른 카드라 충돌 없음</td></tr>
+<tr><td>앱 로딩 시 222건 다 받아옴 → 느림</td><td>필요한 만큼만 받아옴 → 빠름</td></tr>
+<tr><td>화면·기능은 동일</td><td>화면·기능은 동일</td></tr>
+</tbody>
+</table>
+
+<div class="box box-info">
+사용자(납품처, 관리자)는 <strong>화면이나 사용법이 바뀌는 게 없어요.</strong> 내부 저장 방식만 안전하게 바뀌는 거예요.
+</div>
+
+<h2>4. 어떤 순서로 진행하나</h2>
+
+<p>한 번에 다 바꾸면 위험해요. 단계별로 천천히, 매 단계 안전 확인하면서 진행합니다.</p>
+
+<div class="timeline-box now">
+  <span class="step">즉시</span>
+  <h4>0단계: 가장 위험한 부분 먼저 고치기</h4>
+  <div class="time">⏱️ 1시간</div>
+  <div class="desc">출고확정 기능이 데이터를 "통째로 덮어쓰는" 부분 한 곳 → 안전한 방식으로 바꿈. 이것만으로도 사고 위험 크게 줄어요.</div>
+</div>
+
+<div class="timeline-box">
+  <span class="step">1단계</span>
+  <h4>새 저장소 만들고, 양쪽에 동시 저장</h4>
+  <div class="time">⏱️ 4시간</div>
+  <div class="desc">옛 장부책에도 적고, 새 카드함에도 동시에 카드 만들어 넣음. 옛 저장소 그대로 두니까 위험 없음.</div>
+</div>
+
+<div class="timeline-box">
+  <span class="step">2단계</span>
+  <h4>기존 발주서 222건을 새 카드함으로 복사</h4>
+  <div class="time">⏱️ 3시간</div>
+  <div class="desc">이미 있는 발주서들을 카드 1장씩 만들어 카드함에 넣음. 옛 장부책도 그대로 유지.</div>
+</div>
+
+<div class="timeline-box wait">
+  <span class="step">대기</span>
+  <h4>1주일 검증</h4>
+  <div class="time">⏱️ 7일 모니터링</div>
+  <div class="desc">매일 자정에 자동으로 옛 장부책과 새 카드함을 비교. 차이 나면 즉시 알림. 1주일 동안 이상 없으면 다음 단계.</div>
+</div>
+
+<div class="timeline-box">
+  <span class="step">3단계</span>
+  <h4>발주서 읽을 때 새 카드함 사용</h4>
+  <div class="time">⏱️ 6시간</div>
+  <div class="desc">읽기는 카드함에서, 쓰기는 일단 양쪽 다 (안전망). 이때부터 앱이 더 빨라짐.</div>
+</div>
+
+<div class="timeline-box done">
+  <span class="step">4단계</span>
+  <h4>옛 장부책 폐기</h4>
+  <div class="time">⏱️ 2시간</div>
+  <div class="desc">완전히 새 카드함만 사용. 옛 장부책은 30일 정도 보관했다가 백업으로 옮김. 끝!</div>
+</div>
+
+<h2>5. 안전장치</h2>
+
+<h3>🔘 즉시 차단 스위치</h3>
+<p>문제 생기면 관리자가 <strong>스위치 하나만 끄면</strong> 즉시 옛 방식으로 복귀해요. 코드 수정 안 해도 됨.</p>
+
+<h3>📊 자동 비교</h3>
+<p>매일 새벽 2시에 옛 장부책과 새 카드함을 자동으로 비교해요. 다른 게 발견되면 슬랙으로 즉시 알림 발송.</p>
+
+<h3>📦 30일 보관</h3>
+<p>옛 장부책은 바로 안 지우고 30일간 그대로 둠. 혹시 모를 사고 대비.</p>
+
+<h2>6. 위험은 없나</h2>
+
+<h3>있어요. 솔직히 말씀드리면.</h3>
+
+<table>
+<thead><tr><th>위험</th><th>대응</th></tr></thead>
+<tbody>
+<tr><td>옛 장부책과 새 카드함이 조금 다를 수 있음</td><td>매일 자동 비교 + 알림</td></tr>
+<tr><td>마이그레이션 중에 새 버그 가능</td><td>각 단계 작게 나눠서, 매번 운영하며 확인</td></tr>
+<tr><td>4단계 후 롤백은 비용 큼</td><td>3단계까지는 1초 안에 롤백 가능. 4단계는 충분히 검증 후</td></tr>
+<tr><td>2주간 신경 써야 함</td><td>대신 끝나면 영원히 안심</td></tr>
+</tbody>
+</table>
+
+<h2>7. 한 줄 요약</h2>
+
+<div class="box box-info" style="font-size:16px;text-align:center;padding:20px">
+<strong>"발주서 한 권 통째로" 저장 → "발주서 하나씩 따로" 저장으로 바꿔서<br>
+사고 안 나게 만드는 작업이에요. 2주 걸려요.</strong>
+</div>
+
+<p style="margin-top:40px;color:#9ca3af;font-size:11px;text-align:center;border-top:1px solid #e5e7eb;padding-top:20px">— 끝 —</p>
+
+</body>
+</html>

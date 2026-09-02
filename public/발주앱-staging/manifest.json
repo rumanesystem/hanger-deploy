@@ -1,0 +1,14 @@
+{
+  "name": "시스템행거 발주관리",
+  "short_name": "발주관리",
+  "description": "시스템행거 발주·재고 관리 앱",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1e40af",
+  "orientation": "any",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

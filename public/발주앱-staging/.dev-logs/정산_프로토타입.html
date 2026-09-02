@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>발주허브 — 정산 + 거래처 원장 프로토타입</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.5.0/css/all.min.css"/>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+<style>
+:root{--primary:#1e40af;--primary-light:#3b82f6;--bg:#f1f5f9;--card:#ffffff;--border:#e2e8f0;--text:#0f172a;--text-2:#475569;--text-3:#94a3b8;--r:10px;--r-sm:6px}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"Pretendard",-apple-system,"Malgun Gothic",sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.6;padding:24px;max-width:1280px;margin:0 auto}
+input,select,button,textarea{font-family:inherit;font-size:14px}
+button{cursor:pointer}
+
+.notice{background:#fffbeb;border-left:4px solid #f59e0b;padding:12px 16px;margin-bottom:20px;border-radius:6px;font-size:13px;color:#92400e}
+
+.page-header{margin-bottom:18px}
+.page-title{font-size:22px;font-weight:800;color:var(--text);margin-bottom:4px}
+.page-sub{font-size:13px;color:var(--text-3)}
+
+.main-tabs{display:flex;gap:0;border-bottom:2px solid var(--border);margin-bottom:24px}
+.main-tab{padding:12px 24px;background:none;border:none;font-size:14px;font-weight:700;color:var(--text-3);border-bottom:3px solid transparent;margin-bottom:-2px}
+.main-tab.active{color:var(--primary);border-bottom-color:var(--primary)}
+
+.period-tabs{display:flex;gap:4px;background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:4px;margin-bottom:14px;flex-wrap:wrap}
+.period-tab{flex:1;min-width:80px;padding:9px 12px;border-radius:var(--r-sm);border:none;background:transparent;font-size:13px;font-weight:600;color:var(--text-2)}
+.period-tab.active{background:var(--primary);color:#fff}
+.period-tab:hover:not(.active){background:var(--bg)}
+
+.filter-card{background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:16px 20px;margin-bottom:16px}
+.filter-row{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end}
+.filter-item{display:flex;flex-direction:column;gap:5px}
+.filter-label{font-size:11px;font-weight:700;color:var(--text-2)}
+.filter-item input,.filter-item select{padding:7px 10px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:13px;min-width:140px}
+.btn-search{background:var(--primary);color:#fff;border:none;padding:9px 20px;border-radius:var(--r-sm);font-size:13px;font-weight:700}
+
+.summary-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}
+.summary-card{background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:16px 18px}
+.summary-label{font-size:11px;color:var(--text-3);font-weight:600;margin-bottom:6px}
+.summary-value{font-size:22px;font-weight:800;color:var(--text)}
+.summary-card.primary .summary-value{color:var(--primary)}
+
+.data-card{background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:16px 18px;margin-bottom:16px}
+.data-card-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.data-card-title{font-size:14px;font-weight:700;color:var(--text)}
+.btn-export{background:#15803d;color:#fff;border:none;padding:7px 14px;border-radius:var(--r-sm);font-size:12px;font-weight:700}
+
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{background:#f9fafb;padding:10px 12px;text-align:left;border-bottom:2px solid var(--border);font-size:12px;font-weight:700;color:var(--text-2)}
+td{padding:10px 12px;border-bottom:1px solid var(--border)}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+td.center,th.center{text-align:center}
+tr.row-main{cursor:pointer}
+tr.row-main:hover td{background:#f0f7ff}
+tr.row-detail{background:#fafafa}
+tr.row-detail.hidden{display:none}
+tr.row-total td{font-weight:800;background:#eff6ff;color:var(--primary);border-top:2px solid var(--primary)}
+
+.badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700}
+.badge-wh-siheung{background:#dbeafe;color:#1e40af}
+.badge-wh-pyeongtaek{background:#dcfce7;color:#065f46}
+
+.btn-edit,.btn-link{padding:4px 10px;border-radius:4px;font-size:11px;font-weight:700;border:1px solid;background:#fff}
+.btn-edit{color:#3b82f6;border-color:#3b82f6}
+.btn-link{color:#7c3aed;border-color:#7c3aed}
+
+.inline-edit{background:#fefce8;padding:12px;border-radius:6px;margin:8px 0;border:2px solid #facc15}
+.inline-edit-row{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
+.inline-edit-row label{font-size:11px;font-weight:700;color:var(--text-2);display:flex;flex-direction:column;gap:3px}
+.inline-edit-row input,.inline-edit-row select{padding:5px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px;width:120px}
+.btn-save{background:#15803d;color:#fff;border:none;padding:5px 12px;border-radius:4px;font-size:12px;font-weight:700}
+.btn-cancel{background:#fff;color:var(--text-2);border:1px solid var(--border);padding:5px 12px;border-radius:4px;font-size:12px;font-weight:700}
+
+tr.has-unpaid{background:#fef2f2}
+tr.has-unpaid:hover{background:#fee2e2;cursor:pointer}
+tr.paid:hover{background:#f0fdf4;cursor:pointer}
+tr.paid{cursor:pointer}
+.btn-view{background:var(--primary);color:#fff;border:none;padding:6px 14px;border-radius:var(--r-sm);font-size:12px;font-weight:700}
+.btn-back{background:#fff;color:var(--text-2);border:1px solid var(--border);padding:7px 14px;border-radius:var(--r-sm);font-size:13px;font-weight:600}
+.btn-add-payment{background:#15803d;color:#fff;border:none;padding:8px 16px;border-radius:var(--r-sm);font-size:13px;font-weight:700}
+
+.ledger-summary{background:linear-gradient(135deg,#eff6ff,#dbeafe);border:1px solid #bfdbfe;border-radius:var(--r);padding:22px 28px;margin-bottom:18px}
+.ledger-summary-grid{display:grid;grid-template-columns:1.5fr 1fr 1fr 1fr;gap:20px;align-items:center}
+.ledger-name{font-size:24px;font-weight:800;color:var(--primary)}
+.ledger-label{font-size:11px;color:var(--text-3);font-weight:600;margin-bottom:4px}
+.ledger-value{font-size:19px;font-weight:800}
+.ledger-value.danger{color:#dc2626}
+.ledger-value.success{color:#15803d}
+.type-badge{display:inline-block;padding:3px 10px;border-radius:6px;font-size:11px;font-weight:700}
+.type-out{background:#dbeafe;color:#1e40af}
+.type-in{background:#d1fae5;color:#065f46}
+
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;align-items:center;justify-content:center}
+.modal-overlay.show{display:flex}
+.modal{background:#fff;border-radius:var(--r);width:90%;max-width:420px}
+.modal-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+.modal-title{font-size:15px;font-weight:700}
+.modal-close{background:none;border:none;font-size:20px;color:var(--text-3)}
+.modal-body{padding:20px;display:flex;flex-direction:column;gap:14px}
+.modal-body label{display:flex;flex-direction:column;gap:5px;font-size:12px;font-weight:700;color:var(--text-2)}
+.modal-body input,.modal-body textarea{padding:9px 12px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:13px}
+.modal-footer{padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end}
+
+.hidden{display:none !important}
+
+@media(max-width:768px){
+  .summary-grid{grid-template-columns:repeat(2,1fr)}
+  .filter-row{flex-direction:column;align-items:stretch}
+  .filter-item input,.filter-item select{min-width:0;width:100%}
+  .ledger-summary-grid{grid-template-columns:1fr 1fr}
+  .ledger-name{font-size:18px}
+  .ledger-value{font-size:16px}
+}
+</style>
+</head>
+<body>
+
+<div class="notice">
+  <strong>📌 프로토타입 미리보기</strong> — 발주허브 정산 페이지 + 거래처 원장 UI/UX 미리보기입니다.
+  Mock 데이터로 동작하며, 실제 배포 시 발주앱 데이터와 연결됩니다.
+</div>
+
+<div class="page-header">
+  <div class="page-title">발주허브 — 관리자 전용</div>
+  <div class="page-sub">정산 페이지와 거래처 원장 프로토타입</div>
+</div>
+
+<!-- 메인 탭 -->
+<div class="main-tabs">
+  <button class="main-tab active" data-view="settlement"><i class="fas fa-receipt"></i> 정산</button>
+  <button class="main-tab" data-view="ledger"><i class="fas fa-book"></i> 거래처 원장</button>
+</div>
+
+<!-- ============================================================ -->
+<!-- 정산 페이지 -->
+<!-- ============================================================ -->
+<div id="view-settlement">
+  <div class="period-tabs">
+    <button class="period-tab" data-mode="daily">일별</button>
+    <button class="period-tab" data-mode="weekly">주별</button>
+    <button class="period-tab active" data-mode="monthly">월별</button>
+    <button class="period-tab" data-mode="quarterly">분기별</button>
+    <button class="period-tab" data-mode="yearly">연간</button>
+    <button class="period-tab" data-mode="custom">직접입력</button>
+  </div>
+
+  <div class="filter-card">
+    <div class="filter-row">
+      <div class="filter-item" id="date-picker-wrap"></div>
+      <div class="filter-item">
+        <div class="filter-label">납품처</div>
+        <input type="text" id="filter-orderer" list="orderer-list" placeholder="납품처 검색 (비우면 전체)" autocomplete="off" style="min-width:180px"/>
+        <datalist id="orderer-list">
+          <option value="홍길동"></option><option value="박규태"></option>
+          <option value="김철수"></option><option value="이영희"></option>
+        </datalist>
+      </div>
+      <div class="filter-item">
+        <div class="filter-label">출고 창고</div>
+        <select id="filter-warehouse">
+          <option value="">전체</option><option>시흥</option><option>평택</option>
+        </select>
+      </div>
+      <button class="btn-search" onclick="loadSettlement()"><i class="fas fa-search"></i> 조회</button>
+    </div>
+  </div>
+
+  <div class="summary-grid">
+    <div class="summary-card"><div class="summary-label">출고완료 건수</div><div class="summary-value" id="sum-count">—</div></div>
+    <div class="summary-card"><div class="summary-label">공급가액 합계</div><div class="summary-value" id="sum-supply">—</div></div>
+    <div class="summary-card"><div class="summary-label">부가세 합계</div><div class="summary-value" id="sum-vat">—</div></div>
+    <div class="summary-card primary"><div class="summary-label">총 합계 금액</div><div class="summary-value" id="sum-total">—</div></div>
+  </div>
+
+  <div class="data-card">
+    <div class="data-card-head">
+      <div class="data-card-title">납품처별 정산</div>
+      <button class="btn-export" onclick="exportExcel()"><i class="fas fa-file-excel"></i> 엑셀 다운로드</button>
+    </div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr>
+          <th>납품처</th><th class="num">건수</th><th class="num">공급가액</th>
+          <th class="num">부가세</th><th class="num">합계 금액</th><th class="center">상세</th>
+        </tr></thead>
+        <tbody id="tbody-ordererwise"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="data-card" id="trend-card">
+    <div class="data-card-head">
+      <div class="data-card-title" id="trend-title">일별 추이</div>
+    </div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>날짜</th><th class="num">건수</th><th class="num">합계 금액</th></tr></thead>
+        <tbody id="tbody-trend"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- 거래처 원장 -->
+<!-- ============================================================ -->
+<div id="view-ledger" class="hidden">
+  <div id="view-list">
+    <div class="filter-card" style="display:flex;justify-content:space-between;align-items:center">
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600">
+        <input type="checkbox" id="filter-unpaid"/> 미수금 있는 거래처만 보기
+      </label>
+      <div style="font-size:12px;color:var(--text-3)">전체 4개 거래처</div>
+    </div>
+    <div class="data-card">
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th>납품처</th><th class="num">총 발주 건수</th><th class="num">총 출고금액</th>
+            <th class="num">총 입금액</th><th class="num">미수금 잔액</th><th class="center">상세 보기</th>
+          </tr></thead>
+          <tbody id="tbody-customers"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="view-detail" class="hidden">
+    <button class="btn-back" onclick="goBackToList()"><i class="fas fa-arrow-left"></i> 거래처 목록</button>
+    <div class="ledger-summary" style="margin-top:16px">
+      <div class="ledger-summary-grid">
+        <div><div class="ledger-label">납품처</div><div class="ledger-name" id="detail-name">—</div></div>
+        <div><div class="ledger-label">총 출고금액</div><div class="ledger-value" id="detail-total-out">—</div></div>
+        <div><div class="ledger-label">총 입금액</div><div class="ledger-value success" id="detail-total-in">—</div></div>
+        <div><div class="ledger-label">현재 미수금</div><div class="ledger-value danger" id="detail-balance">—</div></div>
+      </div>
+    </div>
+    <div class="data-card">
+      <div class="data-card-head">
+        <div class="data-card-title">출고/입금 내역</div>
+        <button class="btn-add-payment" onclick="openPaymentModal()"><i class="fas fa-plus"></i> 입금 등록</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th>날짜</th><th class="center">구분</th><th>내용</th>
+            <th class="num">출고금액</th><th class="num">입금액</th><th class="num">잔액</th><th class="center">관리</th>
+          </tr></thead>
+          <tbody id="tbody-ledger"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 입금 등록 모달 -->
+<div class="modal-overlay" id="payment-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">입금 등록</div>
+      <button class="modal-close" onclick="closePaymentModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <label>입금일<input type="date" id="payment-date"/></label>
+      <label>입금 금액<input type="number" id="payment-amount" placeholder="0" min="0"/></label>
+      <label>메모 (선택)<textarea id="payment-memo" rows="2" placeholder="예: 6월 1차 정산, 어음"></textarea></label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-back" onclick="closePaymentModal()">취소</button>
+      <button class="btn-add-payment" onclick="savePayment()"><i class="fas fa-check"></i> 저장</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// Mock 데이터
+// ============================================================
+const ORDERS = [
+  { id:1,orderNum:'20260601-001',status:'출고완료',orderDate:'2026-06-01',shipDate:'2026-06-03',deliveryTo:'홍길동',address:'서울시 강남구 역삼동 123',warehouse:'시흥',totalSupply:150000,totalVat:15000,totalAmount:165000 },
+  { id:2,orderNum:'20260602-001',status:'출고완료',orderDate:'2026-06-02',shipDate:'2026-06-05',deliveryTo:'박규태',address:'경기 성남시 분당구 정자동 456',warehouse:'평택',totalSupply:200000,totalVat:20000,totalAmount:220000 },
+  { id:3,orderNum:'20260603-001',status:'출고완료',orderDate:'2026-06-03',shipDate:'2026-06-06',deliveryTo:'홍길동',address:'서울 마포구 합정동 789',warehouse:'시흥',totalSupply:180000,totalVat:18000,totalAmount:198000 },
+  { id:4,orderNum:'20260605-001',status:'출고완료',orderDate:'2026-06-05',shipDate:'2026-06-08',deliveryTo:'김철수',address:'인천 부평구 부평동 11',warehouse:'시흥',totalSupply:120000,totalVat:12000,totalAmount:132000 },
+  { id:5,orderNum:'20260607-001',status:'출고완료',orderDate:'2026-06-07',shipDate:'2026-06-10',deliveryTo:'박규태',address:'서울 송파구 잠실동 22',warehouse:'평택',totalSupply:250000,totalVat:25000,totalAmount:275000 },
+  { id:6,orderNum:'20260608-001',status:'출고완료',orderDate:'2026-06-08',shipDate:'2026-06-11',deliveryTo:'홍길동',address:'서울 종로구 인사동 33',warehouse:'시흥',totalSupply:160000,totalVat:16000,totalAmount:176000 },
+  { id:7,orderNum:'20260610-001',status:'출고완료',orderDate:'2026-06-10',shipDate:'2026-06-13',deliveryTo:'이영희',address:'경기 안양시 동안구 평촌동 44',warehouse:'시흥',totalSupply:140000,totalVat:14000,totalAmount:154000 },
+  { id:8,orderNum:'20260612-001',status:'출고완료',orderDate:'2026-06-12',shipDate:'2026-06-15',deliveryTo:'홍길동',address:'서울 강남구 청담동 55',warehouse:'평택',totalSupply:220000,totalVat:22000,totalAmount:242000 },
+  { id:9,orderNum:'20260614-001',status:'출고완료',orderDate:'2026-06-14',shipDate:'2026-06-17',deliveryTo:'김철수',address:'인천 서구 청라동 66',warehouse:'시흥',totalSupply:130000,totalVat:13000,totalAmount:143000 },
+  { id:10,orderNum:'20260615-001',status:'출고완료',orderDate:'2026-06-15',shipDate:'2026-06-18',deliveryTo:'박규태',address:'서울 영등포구 여의도동 77',warehouse:'시흥',totalSupply:190000,totalVat:19000,totalAmount:209000 },
+  { id:11,orderNum:'20260617-001',status:'출고완료',orderDate:'2026-06-17',shipDate:'2026-06-20',deliveryTo:'이영희',address:'경기 광명시 철산동 88',warehouse:'평택',totalSupply:175000,totalVat:17500,totalAmount:192500 },
+  { id:12,orderNum:'20260618-001',status:'출고완료',orderDate:'2026-06-18',shipDate:'2026-06-21',deliveryTo:'홍길동',address:'서울 서초구 서초동 99',warehouse:'시흥',totalSupply:145000,totalVat:14500,totalAmount:159500 },
+  { id:13,orderNum:'20260620-001',status:'출고완료',orderDate:'2026-06-20',shipDate:'2026-06-23',deliveryTo:'박규태',address:'경기 수원시 영통구 매탄동 111',warehouse:'평택',totalSupply:210000,totalVat:21000,totalAmount:231000 },
+  { id:14,orderNum:'20260622-001',status:'출고완료',orderDate:'2026-06-22',shipDate:'2026-06-25',deliveryTo:'홍길동',address:'서울 강동구 천호동 222',warehouse:'시흥',totalSupply:165000,totalVat:16500,totalAmount:181500 },
+  { id:15,orderNum:'20260624-001',status:'출고완료',orderDate:'2026-06-24',shipDate:'2026-06-27',deliveryTo:'김철수',address:'인천 남동구 구월동 333',warehouse:'시흥',totalSupply:155000,totalVat:15500,totalAmount:170500 },
+  { id:16,orderNum:'20260625-001',status:'출고완료',orderDate:'2026-06-25',shipDate:'2026-06-28',deliveryTo:'이영희',address:'경기 김포시 장기동 444',warehouse:'평택',totalSupply:185000,totalVat:18500,totalAmount:203500 },
+  { id:17,orderNum:'20260626-001',status:'출고완료',orderDate:'2026-06-26',shipDate:'2026-06-29',deliveryTo:'박규태',address:'서울 마포구 상암동 555',warehouse:'평택',totalSupply:230000,totalVat:23000,totalAmount:253000 },
+  { id:18,orderNum:'20260627-001',status:'출고완료',orderDate:'2026-06-27',shipDate:'2026-06-30',deliveryTo:'홍길동',address:'서울 노원구 상계동 666',warehouse:'시흥',totalSupply:170000,totalVat:17000,totalAmount:187000 },
+  { id:19,orderNum:'20260628-001',status:'출고완료',orderDate:'2026-06-28',shipDate:'2026-07-01',deliveryTo:'김철수',address:'인천 연수구 송도동 777',warehouse:'시흥',totalSupply:135000,totalVat:13500,totalAmount:148500 },
+  { id:20,orderNum:'20260629-001',status:'출고완료',orderDate:'2026-06-29',shipDate:'2026-07-02',deliveryTo:'이영희',address:'경기 의왕시 포일동 888',warehouse:'평택',totalSupply:195000,totalVat:19500,totalAmount:214500 },
+  { id:21,orderNum:'20260630-001',status:'출고완료',orderDate:'2026-06-30',shipDate:'2026-07-03',deliveryTo:'홍길동',address:'서울 광진구 자양동 999',warehouse:'시흥',totalSupply:175000,totalVat:17500,totalAmount:192500 },
+  { id:22,orderNum:'20260630-002',status:'출고완료',orderDate:'2026-06-30',shipDate:'2026-07-03',deliveryTo:'박규태',address:'서울 용산구 한남동 1010',warehouse:'평택',totalSupply:215000,totalVat:21500,totalAmount:236500 },
+];
+let PAYMENTS = [
+  { id:'p1',customer:'홍길동',date:'2026-06-08',amount:500000,memo:'6월 1차 정산' },
+  { id:'p2',customer:'박규태',date:'2026-06-22',amount:440000,memo:'계좌이체' },
+  { id:'p3',customer:'김철수',date:'2026-06-10',amount:200000,memo:'카드결제' },
+  { id:'p4',customer:'홍길동',date:'2026-06-20',amount:300000,memo:'현금' },
+];
+
+// ============================================================
+// 유틸
+// ============================================================
+const fmt = n => '₩' + (n ?? 0).toLocaleString('ko-KR');
+const pad2 = n => String(n).padStart(2, '0');
+const escapeHtml = s => s == null ? '' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+
+function getDateRange(mode, value) {
+  if (mode === 'daily') return { startDate: value, endDate: value };
+  if (mode === 'weekly') {
+    const mon = new Date(value); const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+    return { startDate: value, endDate: `${sun.getFullYear()}-${pad2(sun.getMonth()+1)}-${pad2(sun.getDate())}` };
+  }
+  if (mode === 'monthly') {
+    const [y, m] = value.split('-').map(Number);
+    const lastDay = new Date(y, m, 0).getDate();
+    return { startDate: `${y}-${pad2(m)}-01`, endDate: `${y}-${pad2(m)}-${lastDay}` };
+  }
+  if (mode === 'quarterly') {
+    const { year, quarter } = value;
+    const startMonth = (quarter-1)*3+1, endMonth = startMonth+2;
+    const lastDay = new Date(year, endMonth, 0).getDate();
+    return { startDate: `${year}-${pad2(startMonth)}-01`, endDate: `${year}-${pad2(endMonth)}-${lastDay}` };
+  }
+  if (mode === 'yearly') return { startDate: `${value}-01-01`, endDate: `${value}-12-31` };
+  if (mode === 'custom') return value;
+}
+
+// ============================================================
+// 정산 화면
+// ============================================================
+let currentMode = 'monthly', currentValue = '2026-06';
+
+function updateDatePicker() {
+  const wrap = document.getElementById('date-picker-wrap');
+  const labelMap = { daily:'날짜', weekly:'주 시작일(월요일)', monthly:'연월', quarterly:'연도+분기', yearly:'연도', custom:'기간' };
+  let html = '';
+  if (currentMode === 'daily')     html = `<input type="date" id="date-input" value="2026-06-15"/>`;
+  else if (currentMode === 'weekly')   html = `<input type="date" id="date-input" value="2026-06-09"/>`;
+  else if (currentMode === 'monthly')  html = `<input type="month" id="date-input" value="2026-06"/>`;
+  else if (currentMode === 'quarterly') html = `<select id="date-year" style="width:90px"><option>2026</option><option>2025</option></select><select id="date-quarter" style="width:80px"><option value="1">1분기</option><option value="2" selected>2분기</option><option value="3">3분기</option><option value="4">4분기</option></select>`;
+  else if (currentMode === 'yearly')   html = `<input type="number" id="date-input" value="2026" style="width:100px"/>`;
+  else if (currentMode === 'custom')   html = `<input type="date" id="date-start" value="2026-06-01"/> <span style="color:var(--text-3)">~</span> <input type="date" id="date-end" value="2026-06-30"/>`;
+  wrap.innerHTML = `<div class="filter-label">${labelMap[currentMode]}</div><div style="display:flex;gap:6px;align-items:center">${html}</div>`;
+}
+
+function getCurrentValue() {
+  if (currentMode === 'quarterly') return { year: +document.getElementById('date-year').value, quarter: +document.getElementById('date-quarter').value };
+  if (currentMode === 'custom') return { startDate: document.getElementById('date-start').value, endDate: document.getElementById('date-end').value };
+  return document.getElementById('date-input').value;
+}
+
+function loadSettlement() {
+  currentValue = getCurrentValue();
+  const range = getDateRange(currentMode, currentValue);
+  const ordererSearch = (document.getElementById('filter-orderer').value || '').trim();
+  const whFilter = document.getElementById('filter-warehouse').value;
+
+  const filtered = ORDERS.filter(o => {
+    if (o.status !== '출고완료') return false;
+    const d = o.shipDate || '';
+    if (!d || d < range.startDate || d > range.endDate) return false;
+    if (ordererSearch && !(o.deliveryTo || '').includes(ordererSearch)) return false;
+    if (whFilter && o.warehouse !== whFilter) return false;
+    return true;
+  });
+
+  // 요약
+  const totalCount = filtered.length;
+  const totalSupply = filtered.reduce((s,o)=>s+(o.totalSupply||0), 0);
+  const totalVat = filtered.reduce((s,o)=>s+(o.totalVat||0), 0);
+  const totalAmount = filtered.reduce((s,o)=>s+(o.totalAmount||0), 0);
+  document.getElementById('sum-count').textContent = totalCount + '건';
+  document.getElementById('sum-supply').textContent = fmt(totalSupply);
+  document.getElementById('sum-vat').textContent = fmt(totalVat);
+  document.getElementById('sum-total').textContent = fmt(totalAmount);
+
+  // 납품처별 그룹
+  const grouped = {};
+  filtered.forEach(o => {
+    if (!grouped[o.deliveryTo]) grouped[o.deliveryTo] = { orders: [], totalSupply: 0, totalVat: 0, totalAmount: 0 };
+    grouped[o.deliveryTo].orders.push(o);
+    grouped[o.deliveryTo].totalSupply += o.totalSupply || 0;
+    grouped[o.deliveryTo].totalVat += o.totalVat || 0;
+    grouped[o.deliveryTo].totalAmount += o.totalAmount || 0;
+  });
+
+  const tbody = document.getElementById('tbody-ordererwise');
+  tbody.innerHTML = '';
+  Object.keys(grouped).sort((a,b)=>grouped[b].totalAmount-grouped[a].totalAmount).forEach((name, idx) => {
+    const g = grouped[name];
+    const rowId = `detail-${idx}`;
+    tbody.insertAdjacentHTML('beforeend', `
+      <tr class="row-main" data-target="${rowId}">
+        <td><strong>${escapeHtml(name)}</strong></td>
+        <td class="num">${g.orders.length}건</td>
+        <td class="num">${fmt(g.totalSupply)}</td>
+        <td class="num">${fmt(g.totalVat)}</td>
+        <td class="num"><strong>${fmt(g.totalAmount)}</strong></td>
+        <td class="center"><i class="fas fa-chevron-down" style="color:var(--text-3)"></i></td>
+      </tr>
+      <tr class="row-detail hidden" id="${rowId}"><td colspan="6" style="padding:0">
+        <div style="padding:12px 16px;background:#fafafa">
+          <table style="background:#fff;border:1px solid var(--border);border-radius:6px">
+            <thead><tr>
+              <th>발주번호</th><th>시공 주소</th><th class="center">창고</th>
+              <th class="num">공급가액</th><th class="num">합계</th>
+              <th class="center">수정</th><th class="center">상세</th>
+            </tr></thead>
+            <tbody>${g.orders.map(o => `
+              <tr id="order-row-${o.id}">
+                <td><code style="background:#eff6ff;color:#1e40af;padding:2px 6px;border-radius:4px;font-weight:700">${o.orderNum}</code></td>
+                <td style="font-size:12px;color:var(--text-2)">${escapeHtml(o.address)}</td>
+                <td class="center"><span class="badge badge-wh-${o.warehouse==='시흥'?'siheung':'pyeongtaek'}">${o.warehouse}</span></td>
+                <td class="num">${fmt(o.totalSupply)}</td>
+                <td class="num"><strong>${fmt(o.totalAmount)}</strong></td>
+                <td class="center"><button class="btn-edit" onclick="startInlineEdit(${o.id})"><i class="fas fa-edit"></i> 수정</button></td>
+                <td class="center"><button class="btn-link" onclick="alert('발주서 상세 모달 열림 (실제 배포 시)')"><i class="fas fa-external-link-alt"></i> 이동</button></td>
+              </tr>
+            `).join('')}</tbody>
+          </table>
+        </div>
+      </td></tr>
+    `);
+  });
+  tbody.insertAdjacentHTML('beforeend', `<tr class="row-total">
+    <td><strong>전체 합계</strong></td><td class="num"><strong>${totalCount}건</strong></td>
+    <td class="num"><strong>${fmt(totalSupply)}</strong></td>
+    <td class="num"><strong>${fmt(totalVat)}</strong></td>
+    <td class="num"><strong>${fmt(totalAmount)}</strong></td><td class="center">—</td>
+  </tr>`);
+
+  document.querySelectorAll('.row-main').forEach(row => {
+    row.addEventListener('click', e => {
+      if (e.target.closest('button')) return;
+      const target = document.getElementById(row.dataset.target);
+      target.classList.toggle('hidden');
+      const icon = row.querySelector('.fa-chevron-down, .fa-chevron-up');
+      if (icon) { icon.classList.toggle('fa-chevron-down'); icon.classList.toggle('fa-chevron-up'); }
+    });
+  });
+
+  // 추이 표
+  const trendCard = document.getElementById('trend-card');
+  if (currentMode === 'daily' || currentMode === 'weekly' || currentMode === 'custom') {
+    trendCard.style.display = 'none';
+  } else {
+    trendCard.style.display = 'block';
+    const tbodyTrend = document.getElementById('tbody-trend');
+    tbodyTrend.innerHTML = '';
+    if (currentMode === 'monthly') {
+      document.getElementById('trend-title').textContent = '일별 추이 (출고완료일 기준)';
+      const daily = {};
+      filtered.forEach(o => { const k=o.shipDate||''; if(!k) return; if(!daily[k]) daily[k]={count:0,total:0}; daily[k].count++; daily[k].total+=o.totalAmount||0; });
+      Object.keys(daily).sort().forEach(d => tbodyTrend.insertAdjacentHTML('beforeend', `<tr><td>${d}</td><td class="num">${daily[d].count}건</td><td class="num">${fmt(daily[d].total)}</td></tr>`));
+    } else {
+      document.getElementById('trend-title').textContent = '월별 추이 (출고완료일 기준)';
+      const monthly = {};
+      filtered.forEach(o => { const k=(o.shipDate||'').slice(0,7); if(!k) return; if(!monthly[k]) monthly[k]={count:0,total:0}; monthly[k].count++; monthly[k].total+=o.totalAmount||0; });
+      Object.keys(monthly).sort().forEach(m => tbodyTrend.insertAdjacentHTML('beforeend', `<tr><td>${m}</td><td class="num">${monthly[m].count}건</td><td class="num">${fmt(monthly[m].total)}</td></tr>`));
+    }
+  }
+}
+
+function startInlineEdit(orderId) {
+  const order = ORDERS.find(o => o.id === orderId);
+  if (!order) return;
+  const row = document.getElementById('order-row-' + orderId);
+  row.innerHTML = `<td colspan="7"><div class="inline-edit">
+    <div class="inline-edit-row">
+      <label>발주번호<input type="text" value="${order.orderNum}" disabled style="background:#f3f4f6"/></label>
+      <label>공급가액<input type="number" id="es-${orderId}" value="${order.totalSupply}"/></label>
+      <label>부가세<input type="number" id="ev-${orderId}" value="${order.totalVat}"/></label>
+      <label>합계<input type="number" id="et-${orderId}" value="${order.totalAmount}"/></label>
+      <label>창고<select id="ew-${orderId}"><option value="시흥" ${order.warehouse==='시흥'?'selected':''}>시흥</option><option value="평택" ${order.warehouse==='평택'?'selected':''}>평택</option></select></label>
+      <label style="flex:1;min-width:200px">시공 주소<input type="text" id="ea-${orderId}" value="${escapeHtml(order.address)}" style="width:100%"/></label>
+    </div>
+    <div style="display:flex;gap:6px">
+      <button class="btn-save" onclick="saveInlineEdit(${orderId})"><i class="fas fa-check"></i> 저장</button>
+      <button class="btn-cancel" onclick="loadSettlement()"><i class="fas fa-times"></i> 취소</button>
+    </div>
+  </div></td>`;
+}
+function saveInlineEdit(orderId) {
+  const order = ORDERS.find(o => o.id === orderId);
+  order.totalSupply = +document.getElementById('es-' + orderId).value || 0;
+  order.totalVat = +document.getElementById('ev-' + orderId).value || 0;
+  order.totalAmount = +document.getElementById('et-' + orderId).value || 0;
+  order.warehouse = document.getElementById('ew-' + orderId).value;
+  order.address = document.getElementById('ea-' + orderId).value;
+  alert('저장됨 (프로토타입). 실제 배포 시 Firestore에 저장됩니다.');
+  loadSettlement();
+}
+
+function exportExcel() {
+  const range = getDateRange(currentMode, currentValue);
+  const ordererSearch = (document.getElementById('filter-orderer').value || '').trim();
+  const whFilter = document.getElementById('filter-warehouse').value;
+  const filtered = ORDERS.filter(o => {
+    if (o.status !== '출고완료') return false;
+    const d = o.shipDate || '';
+    if (!d || d < range.startDate || d > range.endDate) return false;
+    if (ordererSearch && !(o.deliveryTo || '').includes(ordererSearch)) return false;
+    if (whFilter && o.warehouse !== whFilter) return false;
+    return true;
+  });
+  const rows = filtered.map(o => ({
+    '발주번호': o.orderNum, '납품처': o.deliveryTo, '시공 주소': o.address, '창고': o.warehouse,
+    '발주일': o.orderDate, '출고완료일': o.shipDate,
+    '공급가액': o.totalSupply, '부가세': o.totalVat, '합계': o.totalAmount
+  }));
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws['!cols'] = [{wch:16},{wch:12},{wch:32},{wch:8},{wch:12},{wch:12},{wch:14},{wch:12},{wch:14}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '정산');
+  XLSX.writeFile(wb, `settlement_${currentMode}_${typeof currentValue==='object'?JSON.stringify(currentValue):currentValue}.xlsx`);
+}
+
+// ============================================================
+// 거래처 원장
+// ============================================================
+let currentCustomer = null, onlyUnpaid = false;
+
+function getCustomerStats(name) {
+  const orders = ORDERS.filter(o => o.deliveryTo === name && o.status === '출고완료');
+  const payments = PAYMENTS.filter(p => p.customer === name);
+  const totalOut = orders.reduce((s,o)=>s+(o.totalAmount||0), 0);
+  const totalIn = payments.reduce((s,p)=>s+(p.amount||0), 0);
+  return { orderCount: orders.length, totalOut, totalIn, balance: totalOut - totalIn, orders, payments };
+}
+
+function renderCustomerList() {
+  const customers = [...new Set(ORDERS.map(o => o.deliveryTo))];
+  const tbody = document.getElementById('tbody-customers');
+  tbody.innerHTML = '';
+  customers.forEach(name => {
+    const stats = getCustomerStats(name);
+    if (onlyUnpaid && stats.balance <= 0) return;
+    const cls = stats.balance > 0 ? 'has-unpaid' : 'paid';
+    const balColor = stats.balance > 0 ? '#dc2626' : '#15803d';
+    tbody.insertAdjacentHTML('beforeend', `
+      <tr class="${cls}" onclick="goToDetail('${escapeHtml(name)}')">
+        <td><strong>${escapeHtml(name)}</strong></td>
+        <td class="num">${stats.orderCount}건</td>
+        <td class="num">${fmt(stats.totalOut)}</td>
+        <td class="num" style="color:#15803d">${fmt(stats.totalIn)}</td>
+        <td class="num"><strong style="color:${balColor}">${fmt(stats.balance)}</strong></td>
+        <td class="center"><button class="btn-view" onclick="event.stopPropagation(); goToDetail('${escapeHtml(name)}')">▶ 원장 보기</button></td>
+      </tr>
+    `);
+  });
+}
+
+function goToDetail(name) {
+  currentCustomer = name;
+  document.getElementById('view-list').classList.add('hidden');
+  document.getElementById('view-detail').classList.remove('hidden');
+  renderDetail();
+}
+function goBackToList() {
+  currentCustomer = null;
+  document.getElementById('view-list').classList.remove('hidden');
+  document.getElementById('view-detail').classList.add('hidden');
+  renderCustomerList();
+}
+
+function renderDetail() {
+  if (!currentCustomer) return;
+  const stats = getCustomerStats(currentCustomer);
+  document.getElementById('detail-name').textContent = currentCustomer;
+  document.getElementById('detail-total-out').textContent = fmt(stats.totalOut);
+  document.getElementById('detail-total-in').textContent = fmt(stats.totalIn);
+  document.getElementById('detail-balance').textContent = fmt(stats.balance);
+
+  const events = [];
+  stats.orders.forEach(o => events.push({ date: o.shipDate || o.orderDate, type: 'out', orderNum: o.orderNum, address: o.address, warehouse: o.warehouse, amount: o.totalAmount, id: o.id }));
+  stats.payments.forEach(p => events.push({ date: p.date, type: 'in', description: p.memo, amount: p.amount, id: p.id }));
+  events.sort((a,b)=>a.date.localeCompare(b.date));
+  let balance = 0;
+  events.forEach(e => { balance += (e.type==='out' ? e.amount : -e.amount); e.balance = balance; });
+
+  const tbody = document.getElementById('tbody-ledger');
+  tbody.innerHTML = '';
+  [...events].reverse().forEach(e => {
+    const isOut = e.type === 'out';
+    tbody.insertAdjacentHTML('beforeend', `
+      <tr>
+        <td>${e.date}</td>
+        <td class="center"><span class="type-badge ${isOut?'type-out':'type-in'}">${isOut?'출고':'입금'}</span></td>
+        <td>${isOut
+          ? `<code style="background:#eff6ff;color:#1e40af;padding:1px 6px;border-radius:3px;font-weight:700">${e.orderNum}</code> <span style="color:var(--text-2);font-size:12px">${escapeHtml(e.address)} (${e.warehouse})</span>`
+          : escapeHtml(e.description)
+        }</td>
+        <td class="num">${isOut ? fmt(e.amount) : '—'}</td>
+        <td class="num" style="color:#15803d">${!isOut ? fmt(e.amount) : '—'}</td>
+        <td class="num"><strong>${fmt(e.balance)}</strong></td>
+        <td class="center">${!isOut ? `<button class="btn-back" style="padding:3px 9px;font-size:11px" onclick="deletePayment('${e.id}')"><i class="fas fa-trash"></i></button>` : '—'}</td>
+      </tr>
+    `);
+  });
+}
+
+function openPaymentModal() {
+  document.getElementById('payment-date').value = new Date().toISOString().slice(0,10);
+  document.getElementById('payment-amount').value = '';
+  document.getElementById('payment-memo').value = '';
+  document.getElementById('payment-modal').classList.add('show');
+}
+function closePaymentModal() { document.getElementById('payment-modal').classList.remove('show'); }
+
+function savePayment() {
+  const date = document.getElementById('payment-date').value;
+  const amount = +document.getElementById('payment-amount').value;
+  const memo = document.getElementById('payment-memo').value.trim();
+  if (!date || !amount || amount <= 0) { alert('입금일과 금액을 정확히 입력해주세요'); return; }
+  PAYMENTS.push({ id: 'p' + Date.now(), customer: currentCustomer, date, amount, memo });
+  closePaymentModal();
+  renderDetail();
+}
+function deletePayment(id) {
+  if (!confirm('입금 내역을 삭제할까요?')) return;
+  PAYMENTS = PAYMENTS.filter(p => p.id !== id);
+  renderDetail();
+}
+
+// ============================================================
+// 메인 탭 전환
+// ============================================================
+document.querySelectorAll('.main-tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.main-tab').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('view-settlement').classList.toggle('hidden', btn.dataset.view !== 'settlement');
+    document.getElementById('view-ledger').classList.toggle('hidden', btn.dataset.view !== 'ledger');
+  });
+});
+
+document.querySelectorAll('.period-tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.period-tab').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentMode = btn.dataset.mode;
+    updateDatePicker();
+    loadSettlement();
+  });
+});
+
+document.getElementById('filter-orderer').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); loadSettlement(); }
+});
+document.getElementById('filter-unpaid').addEventListener('change', e => {
+  onlyUnpaid = e.target.checked;
+  renderCustomerList();
+});
+
+// 초기화
+updateDatePicker();
+loadSettlement();
+renderCustomerList();
+</script>
+</body>
+</html>

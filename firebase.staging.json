@@ -1,0 +1,18 @@
+{
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "hosting": {
+    "target": "hanger-staging",
+    "public": "public/발주앱-staging",
+    "ignore": ["firebase.json", "firebase.staging.json", "**/.*"],
+    "rewrites": [{"source": "**", "destination": "/index.html"}]
+  },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "ignore": ["node_modules", ".git"]
+    }
+  ]
+}

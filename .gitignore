@@ -9,10 +9,16 @@ functions-debug.log
 .claude/
 public/.claude/
 public/발주앱/firebase-config.js
+public/발주앱-staging/firebase-config.js
+public/발주앱-staging/.backup/
+public/발주앱-staging/*.backup.js
+public/발주앱-staging/*.backup_*.js
 public/발주앱/.backup/
 public/발주앱/app.js.backup_20260403
 public/백업본/
 functions/.env
+.env.staging
+.env.local
 *.docx
 .fuse_hidden*
 .gstack/

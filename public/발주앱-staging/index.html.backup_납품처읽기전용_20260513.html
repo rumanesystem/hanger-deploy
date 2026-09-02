@@ -1,0 +1,936 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<title>발주허브</title>
+<!-- PWA -->
+<link rel="manifest" href="./manifest.json"/>
+<meta name="theme-color" content="#1e3a5f"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="발주허브"/>
+<link rel="apple-touch-icon" href="/icon-192.png"/>
+<script>
+// Android PWA 뒤로가기 종료 방지 — 모듈 로딩 전 동기 실행
+(function(){
+  if(!history.state||!history.state.__guard){
+    history.replaceState({__guard:true},'');
+  }
+})();
+</script>
+<script>
+  // Service Worker 등록 + 자동 업데이트
+  if('serviceWorker' in navigator){
+    let _swReg=null;
+    function _swCheckUpdate(){if(_swReg)_swReg.update().catch(()=>{});}
+
+    window.addEventListener('load',()=>{
+      navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'})
+        .then(reg=>{_swReg=reg;console.log('[PWA] SW 등록 완료');})
+        .catch(e=>console.warn('[PWA] SW 등록 실패',e));
+    });
+
+    // 새 SW 활성화 시 자동 새로고침
+    navigator.serviceWorker.addEventListener('controllerchange',()=>{
+      console.log('[PWA] 새 SW 활성화 → 새로고침');
+      location.reload();
+    });
+
+    // 앱 복귀/포커스 시 SW 업데이트 체크
+    document.addEventListener('visibilitychange',()=>{
+      if(document.visibilityState==='visible')_swCheckUpdate();
+    });
+    window.addEventListener('focus',_swCheckUpdate);
+  }
+
+  // version.txt 폴링 — 새 버전 감지 시 자동 새로고침
+  (function(){
+    function _checkVer(){
+      fetch('./version.txt?_='+Date.now(),{cache:'no-store'})
+        .then(r=>r.text()).then(v=>{
+          v=v.trim();
+          var stored=localStorage.getItem('_appVer');
+          localStorage.setItem('_appVer',v);
+          if(stored&&stored!==v){console.log('[PWA] 새 버전 감지:',v,'→ 새로고침');location.reload();}
+        }).catch(()=>{});
+    }
+    window.addEventListener('load',()=>{_checkVer();setInterval(_checkVer,30000);});
+  })();
+
+  // PWA 설치
+  let _pwaPrompt = null;
+  const _isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const _isInApp = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+
+  window.addEventListener('beforeinstallprompt', e => {
+    e.preventDefault();
+    _pwaPrompt = e;
+    const tb = document.getElementById('topbar-pwa-btn');
+    if(tb) tb.style.display = 'inline-flex';
+  });
+
+  window.addEventListener('appinstalled', () => {
+    _pwaPrompt = null;
+    const wrap = document.getElementById('pwa-install-wrap');
+    if(wrap) wrap.style.display = 'none';
+  });
+
+  function pwaInstall(){
+    if(_isInApp) return; // 이미 설치된 경우
+    if(_isIOS){
+      // iOS: 안내 팝업
+      document.getElementById('ios-install-popup').style.display = 'flex';
+      return;
+    }
+    if(_pwaPrompt){
+      // Android / Desktop Chrome
+      _pwaPrompt.prompt();
+      _pwaPrompt.userChoice.then(r => {
+        if(r.outcome === 'accepted'){
+          document.getElementById('pwa-install-wrap').style.display = 'none';
+        }
+        _pwaPrompt = null;
+      });
+    } else {
+      // 브라우저가 prompt를 지원 안 하는 경우 안내
+      document.getElementById('manual-install-popup').style.display = 'flex';
+    }
+  }
+
+  // DOM 준비 후 설치된 앱이면 버튼 숨기기
+  window.addEventListener('DOMContentLoaded', ()=>{
+    if(_isInApp){
+      const wrap = document.getElementById('pwa-install-wrap');
+      if(wrap) wrap.style.display = 'none';
+    }
+  });
+</script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.5.0/css/all.min.css"/>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<!-- Firebase SDK (compat) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-functions-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script>
+  (function(){
+    const firebaseConfig = window.FIREBASE_CONFIG;
+    try {
+      const app = firebase.initializeApp(firebaseConfig, 'hanger');
+      const db  = app.firestore();
+
+      // Firebase Functions 초기화 (이카운트 ERP 연동)
+      const fnApp = app.functions('asia-northeast3');
+      window._FN = {
+        updateEcountPrice:      fnApp.httpsCallable('updateEcountPrice'),
+        createSaleOrder:        fnApp.httpsCallable('createEcountSaleOrder'),
+        testConnection:         fnApp.httpsCallable('testEcountConnection'),
+        getProducts:            fnApp.httpsCallable('getEcountProducts')
+      };
+
+      window._FS = {
+        async set(key, value) {
+          try {
+            await db.collection('hanger_data').doc(key).set({ value, updatedAt: new Date().toISOString() });
+          } catch(e) { console.warn('[Firestore set 실패]', key, e.message); }
+        },
+        async get(key) {
+          try {
+            const snap = await db.collection('hanger_data').doc(key).get();
+            return snap.exists ? snap.data().value : null;
+          } catch(e) { console.warn('[Firestore get 실패]', key, e.message); return null; }
+        },
+        async getAll() {
+          try {
+            const snaps = await db.collection('hanger_data').get();
+            const result = {};
+            snaps.forEach(d => { result[d.id] = d.data().value; });
+            return result;
+          } catch(e) { console.warn('[Firestore getAll 실패]', e.message); return {}; }
+        },
+        // 단가 실시간 동기화: 다른 기기에서 price_settings가 바뀌면 즉시 반영
+        watchPriceSettings(onChange) {
+          try {
+            return db.collection('hanger_data').doc('price_settings')
+              .onSnapshot(snap => {
+                if(!snap.exists) return;
+                const val = snap.data().value;
+                if(!Array.isArray(val)) return;
+                const local = localStorage.getItem('sh_price_settings');
+                const localStr = JSON.stringify(val);
+                if(local === localStr) return; // 내가 방금 저장한 것이면 무시
+                localStorage.setItem('sh_price_settings', localStr);
+                if(typeof onChange === 'function') onChange(val);
+              }, e => console.warn('[Firestore watch 실패]', e.message));
+          } catch(e) { console.warn('[Firestore watch 초기화 실패]', e.message); }
+        },
+        // 범용 실시간 동기화: orders, inventory 등 주요 데이터
+        watchData(key, onChange) {
+          try {
+            return db.collection('hanger_data').doc(key)
+              .onSnapshot(snap => {
+                if(!snap.exists) return;
+                const val = snap.data().value;
+                if(val == null) return;
+                const localStr = JSON.stringify(val);
+                const existing = localStorage.getItem('sh_' + key);
+                if(existing === localStr) return; // 내가 방금 저장한 것이면 무시
+                localStorage.setItem('sh_' + key, localStr);
+                if(typeof onChange === 'function') onChange(val);
+              }, e => console.warn('[Firestore watch 실패]', key, e.message));
+          } catch(e) { console.warn('[Firestore watch 초기화 실패]', key, e.message); }
+        }
+      };
+      // Firebase Auth 초기화
+      try {
+        window._fbAuth = app.auth();
+        console.log('[Auth] 초기화 완료');
+      } catch(e) { console.warn('[Auth] 초기화 실패', e.message); }
+
+      console.log('[Firestore] 초기화 완료');
+    } catch(e) { console.warn('[Firestore] 초기화 실패', e.message); }
+  })();
+</script>
+<link rel="stylesheet" href="style.css?v=4">
+</head>
+<body>
+<div id="toast"></div>
+<div id="print-area"></div>
+
+<!-- 로그인 -->
+<div id="login-screen" class="active">
+  <div class="login-card">
+    <div class="login-logo">
+      <div class="login-logo-icon"><i class="fas fa-boxes-stacked"></i></div>
+      <div class="login-title">발주허브</div>
+      <div class="login-sub">발주·재고 통합 관리</div>
+    </div>
+
+    <!-- 로그인 탭 -->
+    <div style="display:flex;border:1.5px solid var(--border);border-radius:var(--r-sm);overflow:hidden;margin-bottom:18px">
+      <button id="tab-orderer" onclick="setLoginTab('orderer')"
+        style="flex:1;padding:9px;border:none;font-size:13px;font-weight:700;cursor:pointer;transition:all .15s;background:var(--primary-light);color:#fff">
+        <i class="fas fa-user"></i> 발주자 로그인
+      </button>
+      <button id="tab-admin" onclick="setLoginTab('admin')"
+        style="flex:1;padding:9px;border:none;border-left:1.5px solid var(--border);font-size:13px;font-weight:700;cursor:pointer;transition:all .15s;background:#fff;color:var(--text-3)">
+        <i class="fas fa-user-shield"></i> 관리자 로그인
+      </button>
+    </div>
+
+    <div class="form-group">
+      <label>아이디 또는 이메일</label>
+      <input type="text" class="form-input" id="login-id" placeholder="아이디 또는 이메일 입력" autocomplete="username"/>
+    </div>
+    <div class="form-group">
+      <label>비밀번호</label>
+      <input type="password" class="form-input" id="login-pw" placeholder="비밀번호 입력" autocomplete="current-password"/>
+    </div>
+    <!-- 아이디 저장 / 자동로그인 -->
+    <div style="display:flex;gap:18px;margin-bottom:12px;margin-top:2px">
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-2);cursor:pointer;user-select:none">
+        <input type="checkbox" id="remember-id" style="width:15px;height:15px;accent-color:var(--primary-light);cursor:pointer"/> 아이디 저장
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-2);cursor:pointer;user-select:none">
+        <input type="checkbox" id="auto-login" style="width:15px;height:15px;accent-color:var(--primary-light);cursor:pointer"/> 자동로그인
+      </label>
+    </div>
+    <div id="login-error" style="display:none;color:var(--danger);font-size:12px;margin-bottom:10px"></div>
+    <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px" onclick="doLogin()">
+      <i class="fas fa-sign-in-alt"></i> <span id="login-btn-text">발주자 로그인</span>
+    </button>
+
+    <!-- 발주자 전용: 회원가입 -->
+    <div id="orderer-footer" style="margin-top:14px;text-align:center;border-top:1px solid var(--border);padding-top:14px">
+      <span style="font-size:13px;color:var(--text-3)">계정이 없으신가요?</span>
+      <button onclick="showRegister()" style="background:none;border:none;color:var(--primary-light);font-size:13px;font-weight:700;cursor:pointer;margin-left:6px;padding:0">회원가입</button>
+      <div style="margin-top:10px">
+        <button onclick="showForgotPassword()" style="background:none;border:none;color:var(--text-3);font-size:12px;cursor:pointer;padding:0;text-decoration:underline">비밀번호를 잊으셨나요?</button>
+      </div>
+    </div>
+
+    <!-- 관리자 전용: 최초 계정 생성 -->
+    <div id="admin-footer" style="display:none;margin-top:14px;text-align:center;border-top:1px solid var(--border);padding-top:14px">
+      <span style="font-size:12px;color:var(--text-3)" id="admin-footer-msg"></span>
+    </div>
+
+    <!-- PWA 설치 버튼 -->
+    <div id="pwa-install-wrap" style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px">
+      <button onclick="pwaInstall()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:11px;border:1.5px solid #3b82f6;border-radius:var(--r-sm);background:#eff6ff;color:#1d4ed8;font-size:13px;font-weight:700;cursor:pointer;transition:background .15s" onmouseover="this.style.background='#dbeafe'" onmouseout="this.style.background='#eff6ff'">
+        <i class="fas fa-mobile-screen-button"></i> 앱으로 설치하기
+      </button>
+    </div>
+
+    <!-- iOS 안내 팝업 -->
+    <div id="ios-install-popup" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:flex-end;justify-content:center">
+      <div style="background:#fff;border-radius:16px 16px 0 0;padding:28px 24px 36px;width:100%;max-width:480px;text-align:center">
+        <div style="font-size:15px;font-weight:800;color:#0f172a;margin-bottom:4px">홈 화면에 추가하기</div>
+        <div style="font-size:11px;color:#94a3b8;margin-bottom:14px">아이폰 · 아이패드 전용 안내</div>
+
+        <!-- Safari 사용 중인 경우 -->
+        <div id="ios-safari-guide" style="display:none;font-size:13px;color:#475569;margin-bottom:20px;line-height:1.9;text-align:left;background:#f8fafc;border-radius:10px;padding:14px 16px">
+          <div style="font-weight:700;color:#0f172a;margin-bottom:6px">📌 Safari에서 진행하세요</div>
+          <div><strong>1.</strong> 하단 <i class="fas fa-arrow-up-from-bracket" style="color:#3b82f6"></i> <strong>공유</strong> 버튼 탭</div>
+          <div><strong>2.</strong> <strong>"홈 화면에 추가"</strong> 선택</div>
+          <div><strong>3.</strong> 오른쪽 상단 <strong>"추가"</strong> 탭</div>
+        </div>
+
+        <!-- Safari 아닌 경우 (Chrome 등) -->
+        <div id="ios-chrome-guide" style="display:none;font-size:13px;color:#475569;margin-bottom:20px;line-height:1.9;text-align:left;background:#fff7ed;border-radius:10px;padding:14px 16px;border:1px solid #fed7aa">
+          <div style="font-weight:700;color:#c2410c;margin-bottom:6px">⚠️ 지금 Chrome으로 열려 있어요</div>
+          <div style="margin-bottom:10px">아이폰에서는 <strong>Safari</strong>로 열어야 홈 화면에 추가할 수 있어요.</div>
+          <div style="color:#475569;font-size:12px;line-height:1.8">
+            <strong>1.</strong> 하단 공유 버튼 탭 → <strong>"Safari로 열기"</strong> 선택<br>
+            <strong>2.</strong> Safari에서 다시 하단 <i class="fas fa-arrow-up-from-bracket"></i> 공유 버튼 탭<br>
+            <strong>3.</strong> <strong>"홈 화면에 추가"</strong> 선택 후 <strong>"추가"</strong>
+          </div>
+        </div>
+
+        <script>
+          (function(){
+            var isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+            document.getElementById('ios-safari-guide').style.display = isSafari ? 'block' : 'none';
+            document.getElementById('ios-chrome-guide').style.display = isSafari ? 'none' : 'block';
+          })();
+        </script>
+
+        <button onclick="document.getElementById('ios-install-popup').style.display='none'" style="width:100%;padding:12px;border:none;border-radius:var(--r-sm);background:#1e3a5f;color:#fff;font-size:14px;font-weight:700;cursor:pointer">확인</button>
+      </div>
+    </div>
+
+    <!-- 수동 안내 팝업 (카톡 등 기타 브라우저) -->
+    <div id="manual-install-popup" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center">
+      <div style="background:#fff;border-radius:16px;padding:28px 24px;width:90%;max-width:380px;text-align:center">
+        <div style="font-size:15px;font-weight:800;color:#0f172a;margin-bottom:16px">앱 설치 방법</div>
+
+        <!-- 안드로이드 안내 -->
+        <div style="font-size:13px;color:#475569;margin-bottom:8px;line-height:1.8;text-align:left;background:#eff6ff;border-radius:10px;padding:14px 16px;border:1px solid #bfdbfe">
+          <div style="font-weight:700;color:#1d4ed8;margin-bottom:6px">🌐 안드로이드 사용자</div>
+          <div><strong>Chrome</strong> 또는 <strong>삼성 인터넷</strong>에서 설치 가능해요.<br>해당 브라우저로 이 페이지를 열어주세요.</div>
+        </div>
+
+        <!-- 안드로이드 — Chrome/삼성에서 열었는데도 안 될 때 -->
+        <div style="font-size:12px;color:#64748b;margin-bottom:12px;line-height:1.7;text-align:left;background:#f8fafc;border-radius:10px;padding:12px 16px">
+          <div style="font-weight:700;color:#475569;margin-bottom:4px">설치를 눌렀는데 이 페이지가 떴다면?</div>
+          <div style="margin-bottom:2px">• <strong>Chrome</strong>: 주소창 오른쪽 설치 아이콘 <i class="fas fa-download"></i> 탭<br>&nbsp;&nbsp;또는 메뉴(⋮) → <strong>"앱 설치"</strong></div>
+          <div style="margin-bottom:2px">• <strong>삼성 인터넷</strong>: 메뉴(☰) → <strong>"페이지를 앱으로 추가"</strong></div>
+          <div style="margin-top:8px;padding-top:8px;border-top:1px solid #e2e8f0">• 페이지를 <strong>새로고침</strong> 후 다시 시도해 주세요</div>
+          <div>• 이미 앱이 설치되어 있는지 확인해 주세요</div>
+        </div>
+
+        <!-- 아이폰 안내 -->
+        <div style="font-size:13px;color:#475569;margin-bottom:20px;line-height:1.8;text-align:left;background:#f0fdf4;border-radius:10px;padding:14px 16px;border:1px solid #bbf7d0">
+          <div style="font-weight:700;color:#166534;margin-bottom:6px">🍎 아이폰 사용자</div>
+          <div><strong>Safari</strong>로 이 페이지를 열고<br>하단 공유 버튼 <i class="fas fa-arrow-up-from-bracket"></i> → <strong>"홈 화면에 추가"</strong></div>
+        </div>
+
+        <button onclick="document.getElementById('manual-install-popup').style.display='none'" style="width:100%;padding:12px;border:none;border-radius:var(--r-sm);background:#1e3a5f;color:#fff;font-size:14px;font-weight:700;cursor:pointer">확인</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 회원가입 -->
+<div id="register-screen">
+  <div class="login-card" style="max-width:420px">
+    <div class="login-logo">
+      <div class="login-logo-icon"><i class="fas fa-boxes-stacked"></i></div>
+      <div class="login-title">회원가입</div>
+      <div class="login-sub">발주자 계정을 만듭니다</div>
+    </div>
+    <div class="form-group">
+      <label>납품처 이름 <span class="req">*</span></label>
+      <input type="text" class="form-input" id="reg-delivery-name" placeholder="납품처 이름 입력"/>
+    </div>
+    <div class="form-group">
+      <label>아이디 <span class="req">*</span></label>
+      <input type="text" class="form-input" id="reg-id" placeholder="영문/숫자, 4자 이상" autocomplete="username"/>
+    </div>
+    <div class="form-group">
+      <label>이메일 <span class="req">*</span></label>
+      <input type="email" class="form-input" id="reg-email" placeholder="example@email.com" autocomplete="email"/>
+    </div>
+    <div class="form-group">
+      <label>비밀번호 <span class="req">*</span></label>
+      <input type="password" class="form-input" id="reg-pw" placeholder="6자 이상" autocomplete="new-password"/>
+    </div>
+    <div class="form-group" style="margin-bottom:6px">
+      <label>비밀번호 확인 <span class="req">*</span></label>
+      <input type="password" class="form-input" id="reg-pw2" placeholder="비밀번호 재입력" autocomplete="new-password"/>
+    </div>
+    <div id="reg-error" style="display:none;color:var(--danger);font-size:12px;margin-bottom:10px"></div>
+    <div id="reg-success" style="display:none;color:var(--success);font-size:12px;margin-bottom:10px"></div>
+    <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;margin-bottom:10px" onclick="doRegister()">
+      <i class="fas fa-user-plus"></i> 가입하기
+    </button>
+    <button onclick="showLoginScreen()" style="background:none;border:none;color:var(--text-3);font-size:13px;cursor:pointer;width:100%;padding:4px">
+      <i class="fas fa-arrow-left" style="font-size:11px"></i> 로그인으로 돌아가기
+    </button>
+  </div>
+</div>
+
+<!-- 최초 관리자 계정 생성 -->
+<div id="admin-setup-screen">
+  <div class="login-card" style="max-width:420px">
+    <div class="login-logo">
+      <div class="login-logo-icon" style="background:#0f172a"><i class="fas fa-user-shield"></i></div>
+      <div class="login-title">최초 관리자 계정 생성</div>
+      <div class="login-sub">관리자 계정이 없을 때만 사용할 수 있습니다</div>
+    </div>
+    <div class="form-group">
+      <label>아이디 <span class="req">*</span></label>
+      <input type="text" class="form-input" id="setup-id" placeholder="영문/숫자, 4자 이상"/>
+    </div>
+    <div class="form-group">
+      <label>이름 <span class="req">*</span></label>
+      <input type="text" class="form-input" id="setup-name" placeholder="관리자 이름"/>
+    </div>
+    <div class="form-group">
+      <label>이메일 <span class="req">*</span></label>
+      <input type="email" class="form-input" id="setup-email" placeholder="로그인 및 비밀번호 찾기에 사용" autocomplete="email"/>
+    </div>
+    <div class="form-group">
+      <label>비밀번호 <span class="req">*</span></label>
+      <input type="password" class="form-input" id="setup-pw" placeholder="6자 이상"/>
+    </div>
+    <div class="form-group" style="margin-bottom:6px">
+      <label>비밀번호 확인 <span class="req">*</span></label>
+      <input type="password" class="form-input" id="setup-pw2" placeholder="비밀번호 재입력"/>
+    </div>
+    <div id="setup-error" style="display:none;color:var(--danger);font-size:12px;margin-bottom:10px"></div>
+    <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;margin-bottom:10px;background:#0f172a" onclick="doAdminSetup()">
+      <i class="fas fa-user-shield"></i> 관리자 계정 생성
+    </button>
+    <button onclick="showLoginScreen()" style="background:none;border:none;color:var(--text-3);font-size:13px;cursor:pointer;width:100%;padding:4px">
+      <i class="fas fa-arrow-left" style="font-size:11px"></i> 로그인으로 돌아가기
+    </button>
+  </div>
+</div>
+
+<!-- 비밀번호 찾기 -->
+<div id="forgot-password-screen">
+  <div class="login-card" style="max-width:420px">
+    <div class="login-logo">
+      <div class="login-logo-icon"><i class="fas fa-key"></i></div>
+      <div class="login-title">비밀번호 찾기</div>
+      <div class="login-sub">가입한 이메일로 재설정 링크를 보내드려요</div>
+    </div>
+    <div class="form-group">
+      <label>이메일 <span class="req">*</span></label>
+      <input type="email" class="form-input" id="forgot-email" placeholder="가입 시 입력한 이메일" autocomplete="email"/>
+    </div>
+    <div id="forgot-error" style="display:none;color:var(--danger);font-size:12px;margin-bottom:10px"></div>
+    <div id="forgot-success" style="display:none;color:var(--success);font-size:12px;margin-bottom:10px"></div>
+    <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;margin-bottom:10px" onclick="doForgotPassword()">
+      <i class="fas fa-paper-plane"></i> 재설정 링크 보내기
+    </button>
+    <button onclick="showLoginScreen()" style="background:none;border:none;color:var(--text-3);font-size:13px;cursor:pointer;width:100%;padding:4px">
+      <i class="fas fa-arrow-left" style="font-size:11px"></i> 로그인으로 돌아가기
+    </button>
+  </div>
+</div>
+
+<!-- 앱 -->
+<div class="sb-overlay" id="sb-overlay" onclick="closeSidebar()"></div>
+<div id="app">
+  <aside id="sidebar">
+    <div class="sb-logo">
+      <div class="sb-logo-icon"><i class="fas fa-boxes-stacked"></i></div>
+      <div class="sb-logo-title">발주허브</div>
+      <div class="sb-logo-sub">발주·재고 통합 관리</div>
+    </div>
+    <nav class="sb-nav" id="sb-nav"></nav>
+    <div class="sb-footer">
+      <div class="sb-user" id="sb-user-info"></div>
+      <button class="sb-logout" onclick="doLogout()"><i class="fas fa-sign-out-alt"></i> 로그아웃</button>
+    </div>
+  </aside>
+  <div id="main">
+    <header id="topbar">
+      <button class="topbar-hamburger btn" onclick="openSidebar()"><i class="fas fa-bars"></i></button>
+      <button id="topbar-back" onclick="goBack()" style="display:none;background:none;border:none;color:var(--text-2);padding:8px;border-radius:var(--r-sm);cursor:pointer;font-size:14px;align-self:center;margin-top:2px" title="뒤로가기">
+        <i class="fas fa-arrow-left"></i>
+      </button>
+      <span class="topbar-title" id="topbar-title" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">대시보드</span>
+      <div class="topbar-spacer"></div>
+      <button id="topbar-pwa-btn" onclick="pwaInstall()" title="앱으로 설치" style="display:inline-flex;background:none;border:1px solid #93c5fd;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:700;color:#1d4ed8;cursor:pointer;white-space:nowrap;flex-shrink:0;gap:4px;align-items:center">
+        <i class="fas fa-download" style="font-size:10px"></i> 앱 설치
+      </button>
+      <span class="topbar-role" id="topbar-role" style="white-space:nowrap;flex-shrink:0"></span>
+      <span class="topbar-date" id="topbar-date" style="white-space:nowrap;flex-shrink:0"></span>
+      <div style="position:relative">
+        <button id="profile-btn" onclick="toggleProfile()" style="background:none;border:none;cursor:pointer;display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:var(--r-sm);transition:background .15s" onmouseenter="this.style.background='var(--bg)'" onmouseleave="this.style.background='none'">
+          <span id="profile-avatar" style="width:32px;height:32px;border-radius:50%;background:var(--primary-light);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800"></span>
+          <span id="profile-name" style="font-size:13px;font-weight:600;color:var(--text-2)"></span>
+          <i class="fas fa-chevron-down" style="font-size:10px;color:var(--text-3)"></i>
+        </button>
+        <div id="profile-dropdown" style="display:none;position:absolute;right:0;top:44px;background:#fff;border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--sh-md);min-width:200px;z-index:200;padding:8px 0">
+          <div style="padding:12px 16px;border-bottom:1px solid var(--border)">
+            <p id="dd-name" style="font-size:14px;font-weight:700;color:var(--text)"></p>
+            <p id="dd-role" style="font-size:11px;color:var(--text-3);margin-top:2px"></p>
+            <p id="dd-id" style="font-size:11px;color:var(--text-3)"></p>
+          </div>
+          <button onclick="openProfileEdit();toggleProfile()" style="width:100%;text-align:left;background:none;border:none;padding:10px 16px;font-size:13px;color:var(--text-2);cursor:pointer;display:flex;align-items:center;gap:8px" onmouseenter="this.style.background='var(--bg)'" onmouseleave="this.style.background='none'">
+            <i class="fas fa-pen" style="width:14px"></i> 개인정보 수정
+          </button>
+          <button onclick="doLogout()" style="width:100%;text-align:left;background:none;border:none;padding:10px 16px;font-size:13px;color:#dc2626;cursor:pointer;display:flex;align-items:center;gap:8px" onmouseenter="this.style.background='#fef2f2'" onmouseleave="this.style.background='none'">
+            <i class="fas fa-sign-out-alt" style="width:14px"></i> 로그아웃
+          </button>
+        </div>
+      </div>
+    </header>
+    <div id="content"></div>
+  </div>
+</div>
+
+<!-- 품목별 재고 기록 모달 -->
+<div class="modal-overlay" id="item-log-modal">
+  <div class="modal modal-lg">
+    <div class="modal-header">
+      <span class="modal-title" id="item-log-title">재고 기록</span>
+      <button class="modal-close" onclick="closeModal('item-log-modal')"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body" id="item-log-body"></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('item-log-modal')">닫기</button>
+    </div>
+  </div>
+</div>
+
+<!-- 재고 처리 모달 -->
+<div class="modal-overlay" id="inv-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="inv-modal-title">재고 처리</span>
+      <button class="modal-close" onclick="closeModal('inv-modal')"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body">
+      <div id="inv-modal-info" style="margin-bottom:14px;padding:10px 12px;background:var(--bg);border-radius:var(--r-sm);font-size:13px"></div>
+      <div class="form-group">
+        <label>창고 선택 <span class="req">*</span></label>
+        <div style="display:flex;gap:8px">
+          <button type="button" id="inv-wh-siheung" class="btn btn-outline" style="flex:1;font-weight:700" onclick="invSelectWarehouse('시흥')">시흥</button>
+          <button type="button" id="inv-wh-pyeongtaek" class="btn btn-outline" style="flex:1;font-weight:700" onclick="invSelectWarehouse('평택')">평택</button>
+        </div>
+        <input type="hidden" id="inv-warehouse" value="시흥"/>
+      </div>
+      <div class="form-group" id="inv-color-group" style="display:none">
+        <label>색상 <span class="req">*</span></label>
+        <select class="form-input" id="inv-color" onchange="updateInvPreview()">
+          <option value="">색상 선택</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>날짜 <span class="req">*</span></label>
+        <input type="date" class="form-input" id="inv-date" style="font-size:15px;font-weight:600"/>
+      </div>
+      <div class="form-group">
+        <label id="inv-qty-label">수량 <span class="req">*</span></label>
+        <input type="number" min="0" class="form-input" id="inv-qty" placeholder="수량 입력" oninput="updateInvPreview()"/>
+      </div>
+      <div id="inv-preview"></div>
+      <div class="form-group" style="margin-bottom:0">
+        <label>메모</label>
+        <input type="text" class="form-input" id="inv-memo" placeholder="사유 또는 메모 (선택)"/>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('inv-modal')">취소</button>
+      <button class="btn btn-primary" id="inv-submit-btn" onclick="submitInventory()">처리</button>
+    </div>
+  </div>
+</div>
+
+<!-- 발주서 등록 모달 -->
+<div class="modal-overlay" id="order-modal">
+  <div class="modal modal-lg">
+    <div class="modal-header">
+      <span class="modal-title">새 발주서 등록</span>
+      <button class="modal-close" onclick="confirmCloseOrderModal()"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body">
+      <!-- 기본 정보 -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px" class="order-info-grid">
+        <div class="form-group" style="margin-bottom:0">
+          <label>납품처 <span class="req">*</span></label>
+          <input type="text" class="form-input" id="o-delivery-to" placeholder="납품처 입력"/>
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label>발주일 <span class="req">*</span></label>
+          <div class="date-split-wrap" id="o-date-wrap">
+            <input class="form-input date-part" id="o-date-y" placeholder="년" maxlength="4" inputmode="numeric" style="width:54px;text-align:center"/>
+            <span class="date-sep">-</span>
+            <input class="form-input date-part" id="o-date-m" placeholder="월" maxlength="2" inputmode="numeric" style="width:36px;text-align:center"/>
+            <span class="date-sep">-</span>
+            <input class="form-input date-part" id="o-date-d" placeholder="일" maxlength="2" inputmode="numeric" style="width:36px;text-align:center"/>
+            <button type="button" class="btn btn-ghost btn-xs date-cal-btn" data-target="o-date" title="달력 선택" style="padding:4px 6px"><i class="fas fa-calendar-alt"></i></button>
+            <input type="date" id="o-date-cal" style="position:absolute;opacity:0;pointer-events:none;width:1px;height:1px"/>
+          </div>
+          <input type="hidden" id="o-date" value=""/>
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label>시공주소</label>
+          <input type="text" class="form-input" id="o-address" placeholder="시공주소 입력"/>
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label>출고일 <span class="req">*</span></label>
+          <div class="date-split-wrap" id="o-ship-date-wrap">
+            <input class="form-input date-part" id="o-ship-y" placeholder="년" maxlength="4" inputmode="numeric" style="width:54px;text-align:center"/>
+            <span class="date-sep">-</span>
+            <input class="form-input date-part" id="o-ship-m" placeholder="월" maxlength="2" inputmode="numeric" style="width:36px;text-align:center"/>
+            <span class="date-sep">-</span>
+            <input class="form-input date-part" id="o-ship-d" placeholder="일" maxlength="2" inputmode="numeric" style="width:36px;text-align:center"/>
+            <button type="button" class="btn btn-ghost btn-xs date-cal-btn" data-target="o-ship-date" title="달력 선택" style="padding:4px 6px"><i class="fas fa-calendar-alt"></i></button>
+            <button type="button" id="o-ship-undecided-btn" class="btn btn-ghost btn-xs" onclick="_setShipDateUndecided(true)" title="출고일 미정" style="padding:4px 10px;font-size:12px;font-weight:700;border:1.5px solid var(--border)">미정</button>
+            <input type="date" id="o-ship-cal" style="position:absolute;opacity:0;pointer-events:none;width:1px;height:1px"/>
+          </div>
+          <input type="hidden" id="o-ship-date" value=""/>
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label>출고 창고 <span class="req">*</span></label>
+          <select id="o-warehouse" class="form-input" style="font-size:15px;font-weight:600;cursor:pointer" onchange="orderSelectWarehouse(this.value)">
+            <option value="">출고지 선택</option>
+            <option value="시흥">시흥 (101)</option>
+            <option value="평택">평택 (102)</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label>비고</label>
+          <input type="text" class="form-input" id="o-note" placeholder="특이사항" style="font-size:15px;font-weight:600"/>
+        </div>
+      </div>
+
+
+      <!-- 구역 A: 상부 자재 -->
+      <div style="border-top:2px solid var(--border);padding-top:12px;margin-bottom:14px">
+        <p style="font-size:13px;font-weight:800;color:var(--text);margin-bottom:8px">
+          <i class="fas fa-layer-group" style="color:var(--primary-light);margin-right:6px"></i>상부 자재
+          <span style="font-size:11px;font-weight:400;color:var(--text-3);margin-left:6px">공통 색상 선택 후 품목별 수량 입력</span>
+        </p>
+        <!-- 공통 색상 선택 -->
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:8px 12px;background:#eff6ff;border-radius:var(--r-sm);border:1px solid #bfdbfe;flex-wrap:wrap">
+          <span style="font-size:13px;font-weight:700;color:#1e40af;white-space:nowrap">공통 색상</span>
+          <select id="upper-common-color" class="form-input" style="max-width:130px;padding:5px 8px;font-size:13px;font-weight:600">
+            <option value="">색상 선택</option>
+            <option value="화이트">화이트</option>
+            <option value="블랙">블랙</option>
+            <option value="실버">실버</option>
+            <option value="샴페인골드">샴페인골드</option>
+          </select>
+        </div>
+        <div style="font-size:11px;color:#1e40af;background:#eff6ff;border:1px dashed #bfdbfe;padding:6px 10px;border-radius:6px;margin-bottom:8px;line-height:1.5">
+          <i class="fas fa-info-circle"></i> 포스트바 길이가 다를 땐 <strong>[📏 길이 분할]</strong> 버튼을 눌러 길이별로 입력하세요. 정척만 발주할 땐 수량만 입력하면 됩니다.
+        </div>
+        <div class="table-wrap" id="upper-material-wrap">
+          <table id="upper-material-table" style="width:100%">
+            <thead><tr>
+              <th style="min-width:140px">품목</th>
+              <th style="min-width:70px">단가</th>
+              <th class="td-center" style="width:80px">수량</th>
+              <th style="min-width:80px">길이 / 비고</th>
+              <th class="td-center" style="min-width:85px">공급가액</th>
+              </tr></thead>
+            <tbody id="upper-material-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 구역 A-2: 옷봉 행 추가형 -->
+      <div style="border-top:2px solid var(--border);padding-top:12px;margin-bottom:14px">
+        <p style="font-size:13px;font-weight:800;color:var(--text);margin-bottom:8px">
+          <i class="fas fa-minus" style="color:var(--primary-light);margin-right:6px"></i>옷봉
+          <span style="font-size:11px;font-weight:400;color:var(--text-3);margin-left:6px">절단 규격·수량 입력 → 옷봉 2400 필요 개수 자동 계산</span>
+        </p>
+        <div class="table-wrap" style="margin-bottom:8px">
+          <table style="font-size:13px">
+            <thead><tr>
+              <th class="td-center" style="width:110px">절단 규격(mm)</th>
+              <th class="td-center" style="width:70px">수량</th>
+              <th class="td-center" style="width:40px"></th>
+            </tr></thead>
+            <tbody id="rod-rows">
+              <tr><td colspan="3" style="text-align:center;color:var(--text-3);font-size:12px;padding:8px">추가된 항목 없음</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px;row-gap:8px">
+          <input type="number" id="rod-size" class="form-input" placeholder="규격 (예: 770)" min="1" max="2400"
+            inputmode="numeric" pattern="[0-9]*" autocomplete="off"
+            style="width:110px;padding:6px 8px;font-size:13px;text-align:center"/>
+          <input type="number" id="rod-qty" class="form-input" placeholder="수량" min="1"
+            inputmode="numeric" pattern="[0-9]*" autocomplete="off"
+            style="width:72px;padding:6px 8px;font-size:13px;text-align:center"/>
+          <button type="button" class="btn btn-primary btn-sm" onclick="addRodRow()">
+            <i class="fas fa-plus"></i> 추가
+          </button>
+        </div>
+        <div id="rod-result" style="display:none;padding:10px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:var(--r-sm);font-size:13px"></div>
+      </div>
+
+      <!-- 구역 B: 선반/코너선반 + 공통 색상 -->
+      <div style="border-top:2px solid var(--border);padding-top:12px;margin-bottom:14px">
+        <p style="font-size:13px;font-weight:800;color:var(--text);margin-bottom:8px">
+          <i class="fas fa-border-all" style="color:#a16207;margin-right:6px"></i>선반 / 코너선반 / 서랍장
+          <span style="font-size:11px;font-weight:400;color:var(--text-3);margin-left:6px">공통 색상 선택 후 각 항목 입력</span>
+        </p>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:8px 12px;background:#eff6ff;border-radius:var(--r-sm);border:1px solid #bfdbfe;flex-wrap:wrap">
+          <span style="font-size:13px;font-weight:700;color:#1e40af;white-space:nowrap">공통 색상</span>
+          <select id="shared-color-sel" class="form-input" style="max-width:130px;padding:5px 8px;font-size:13px;font-weight:600">
+            <option value="">색상 선택</option>
+          </select>
+          <span style="font-size:11px;color:var(--text-3)">선반 · 코너선반 · 서랍장에 동일 적용</span>
+        </div>
+        <div id="shelf-selector-wrap"></div>
+      </div>
+
+      <!-- 구역 C: 서랍 / 옵션 -->
+      <div style="border-top:2px solid var(--border);padding-top:12px">
+        <p style="font-size:13px;font-weight:800;color:var(--text);margin-bottom:8px">
+          <i class="fas fa-boxes-stacked" style="color:var(--primary-light);margin-right:6px"></i>서랍 / 옵션
+          <span style="font-size:11px;font-weight:400;color:var(--text-3);margin-left:6px">서랍장은 재고 자동 계산</span>
+        </p>
+        <div class="table-wrap" id="drawer-table-wrap">
+          <table id="drawer-table">
+            <thead><tr>
+              <th style="min-width:130px">품목</th>
+              <th style="min-width:70px">단가</th>
+              <th class="td-center" style="width:80px">수량</th>
+              <th class="td-center" style="width:100px">색상</th>
+              <th class="td-center" style="width:72px">현재고</th>
+              <th class="td-center" style="width:80px">차감 후 부족</th>
+              <th class="td-center" style="min-width:85px">공급가액</th>
+            </tr></thead>
+            <tbody id="drawer-body"></tbody>
+          </table>
+        </div>
+        <div style="margin-top:10px">
+          <label style="font-size:12px;font-weight:700;color:var(--text-2);display:block;margin-bottom:4px">서랍 메모 (자유 기재)</label>
+          <textarea class="form-input" id="o-drawer-memo" rows="2" placeholder="추가 메모" style="resize:vertical;font-size:15px;font-weight:600"></textarea>
+        </div>
+      </div>
+
+      <!-- 기타 -->
+      <div style="border-top:2px solid var(--border);padding-top:12px;margin-top:14px">
+        <p style="font-size:13px;font-weight:800;color:var(--text);margin-bottom:8px">
+          <i class="fas fa-pen-to-square" style="color:var(--text-3);margin-right:6px"></i>기타
+          <span style="font-size:11px;font-weight:400;color:var(--text-3);margin-left:6px">자유 기재</span>
+        </p>
+        <textarea class="form-input" id="o-etc-memo" rows="3" placeholder="기타 사항 자유 기재" style="resize:vertical;font-size:15px;font-weight:600"></textarea>
+      </div>
+    </div>
+    <!-- 하단 고정 영역: 총합계 + 버튼 -->
+    <div class="order-modal-bottom">
+      <div class="order-total-bar" style="flex-direction:column;align-items:stretch;gap:0;padding:10px 20px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+          <span style="font-size:12px;font-weight:600;color:var(--text-3)">총 공급가액</span>
+          <span style="font-size:14px;font-weight:700;color:#334155" id="order-supply-amount">0원</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <span style="font-size:12px;font-weight:600;color:var(--text-3)">부가세 (10%)</span>
+          <span style="font-size:14px;font-weight:700;color:#475569" id="order-vat-amount">0원</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;border-top:1.5px solid var(--border);padding-top:5px">
+          <span class="total-label"><i class="fas fa-calculator" style="margin-right:6px;color:var(--primary-light)"></i>합계금액</span>
+          <span class="total-value" id="order-total-amount">0원</span>
+        </div>
+      </div>
+      <div class="modal-footer" style="flex-wrap:wrap">
+        <button class="btn btn-outline" onclick="confirmCloseOrderModal()" style="min-width:0">취소</button>
+        <button class="btn btn-outline" onclick="submitOrder('임시저장')" style="color:#64748b;border-color:#cbd5e1;min-width:0"><i class="fas fa-floppy-disk"></i> 임시저장</button>
+        <button class="btn btn-primary" id="order-submit-btn" onclick="openOrderConfirmModal()" style="min-width:0"><i class="fas fa-check"></i> <span id="order-submit-label">발주 넣기</span></button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 발주서 상세 모달 -->
+<div class="modal-overlay" id="order-detail-modal">
+  <div class="modal modal-lg">
+    <div class="modal-header">
+      <span class="modal-title">발주서 상세</span>
+      <button class="modal-close" onclick="closeModal('order-detail-modal')"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body" id="order-detail-body"></div>
+    <div class="modal-footer" style="background:#f8fafc;border-top:2px solid #e5e7eb;padding:12px 20px;gap:8px;justify-content:space-between;flex-wrap:wrap">
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-outline btn-sm" id="print-order-btn" onclick="printOrder(window._currentPrintOrder)" style="border:1.5px solid #374151;color:#111827;font-weight:700"><i class="fas fa-print"></i> 인쇄</button>
+        <button class="btn btn-outline btn-sm" id="pdf-order-btn" style="border:1.5px solid #dc2626;color:#dc2626;font-weight:700"><i class="fas fa-file-pdf"></i> PDF 저장</button>
+        <button class="btn btn-outline btn-sm" id="img-order-btn" onclick="saveImageOrder(window._currentPrintOrder)" style="border:1.5px solid #7c3aed;color:#7c3aed;font-weight:700"><i class="fas fa-image"></i> 이미지 저장</button>
+        <button class="btn btn-outline btn-sm" id="excel-order-btn" style="border:1.5px solid #15803d;color:#15803d;font-weight:700"><i class="fas fa-file-excel"></i> 엑셀</button>
+        <button class="btn btn-outline btn-sm" id="edit-order-btn" style="border:1.5px solid #3b82f6;color:#1e40af;font-weight:700"><i class="fas fa-pen"></i> 수정</button>
+        <button class="btn btn-outline btn-sm" id="copy-order-btn" style="border:1.5px solid #16a34a;color:#15803d;font-weight:700"><i class="fas fa-copy"></i> 발주서 복사</button>
+        <button class="btn btn-outline btn-sm" id="detail-cancel-order-btn" style="display:none;border:1.5px solid #dc2626;color:#dc2626;font-weight:700"><i class="fas fa-ban"></i> 발주 취소</button>
+        <button class="btn btn-outline btn-sm" id="lock-order-btn" style="display:none"></button>
+        <div id="status-change-btns" style="display:flex;gap:4px;flex-wrap:wrap"></div>
+      </div>
+      <button class="btn btn-primary" onclick="closeModal('order-detail-modal')" style="padding:8px 20px;font-weight:700">닫기</button>
+    </div>
+  </div>
+</div>
+
+<!-- 발주확정 최종 확인 모달 -->
+<div class="modal-overlay" id="order-confirm-modal">
+  <div class="modal" style="max-width:820px">
+    <div class="modal-header">
+      <span class="modal-title"><i class="fas fa-circle-check" style="color:var(--primary-light);margin-right:8px"></i><span id="order-confirm-modal-title">발주 넣기 최종 확인</span></span>
+      <button class="modal-close" onclick="closeModal('order-confirm-modal')"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body" id="order-confirm-body" style="padding:16px 20px"></div>
+    <div class="modal-footer" style="flex-wrap:wrap;gap:8px">
+      <button class="btn btn-outline" onclick="closeModal('order-confirm-modal')" style="min-width:80px">취소</button>
+      <button class="btn btn-primary" id="order-confirm-ok-btn" style="min-width:120px"><i class="fas fa-check"></i> <span id="order-confirm-ok-label">발주 넣기</span></button>
+    </div>
+  </div>
+</div>
+
+
+
+<!-- 발주 취소 사유 모달 -->
+<div class="modal-overlay" id="order-cancel-modal">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-header">
+      <span class="modal-title"><i class="fas fa-ban" style="color:var(--danger);margin-right:8px"></i>발주 취소</span>
+      <button class="modal-close" onclick="closeModal('order-cancel-modal')"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body" style="padding:16px 20px">
+      <p style="color:var(--text-2);margin-bottom:12px;font-size:14px">취소하면 차감된 재고가 복구됩니다.</p>
+      <label class="form-label">취소 사유 <span style="color:var(--danger)">*</span></label>
+      <textarea id="cancel-reason-input" class="form-input" rows="3" placeholder="취소 사유를 입력해주세요" style="resize:vertical;min-height:72px;width:100%"></textarea>
+      <p id="cancel-reason-error" style="color:var(--danger);font-size:12px;margin-top:4px;display:none">취소 사유를 입력해주세요.</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('order-cancel-modal')">돌아가기</button>
+      <button class="btn btn-danger" id="order-cancel-confirm-btn"><i class="fas fa-ban"></i> 취소 확정</button>
+    </div>
+  </div>
+</div>
+
+<!-- 개인정보 수정 모달 -->
+<div class="modal-overlay" id="profile-modal">
+  <div class="modal" style="max-width:400px">
+    <div class="modal-header">
+      <span class="modal-title">개인정보 수정</span>
+      <button class="modal-close" onclick="closeModal('profile-modal')"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>아이디</label>
+        <input type="text" class="form-input" id="profile-id" disabled style="background:#f1f5f9;color:var(--text-3)"/>
+      </div>
+      <div class="form-group">
+        <label>이름 <span class="req">*</span></label>
+        <input type="text" class="form-input" id="profile-name-input" placeholder="이름 입력"/>
+      </div>
+      <div class="form-group" id="profile-delivery-group">
+        <label>업체명(납품처)</label>
+        <input type="text" class="form-input" id="profile-delivery-name" placeholder="업체명 또는 납품처 이름"/>
+      </div>
+      <div class="form-group">
+        <label>이메일</label>
+        <input type="email" class="form-input" id="profile-email" placeholder="이메일 입력"/>
+      </div>
+      <div style="border-top:1px solid var(--border);padding-top:14px;margin-top:4px">
+        <p style="font-size:12px;font-weight:700;color:var(--text-2);margin-bottom:10px">비밀번호 변경 (변경 시에만 입력)</p>
+        <div class="form-group">
+          <label>새 비밀번호</label>
+          <input type="password" class="form-input" id="profile-pw" placeholder="6자 이상"/>
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label>비밀번호 확인</label>
+          <input type="password" class="form-input" id="profile-pw2" placeholder="비밀번호 재입력"/>
+        </div>
+      </div>
+      <div id="profile-error" style="display:none;color:var(--danger);font-size:12px;margin-top:10px"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('profile-modal')">취소</button>
+      <button class="btn btn-primary" onclick="submitProfileEdit()"><i class="fas fa-save"></i> 저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- 계정 관리 모달 (관리자 전용) -->
+<div class="modal-overlay" id="account-modal">
+  <div class="modal" style="max-width:400px">
+    <div class="modal-header">
+      <span class="modal-title" id="account-modal-title">계정 추가</span>
+      <button class="modal-close" onclick="closeModal('account-modal')"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>아이디 <span class="req">*</span></label>
+        <input type="text" class="form-input" id="acc-id" placeholder="영문/숫자"/>
+      </div>
+      <div class="form-group">
+        <label>이름 <span class="req">*</span></label>
+        <input type="text" class="form-input" id="acc-name" placeholder="이름"/>
+      </div>
+      <div class="form-group">
+        <label>이메일 <span class="req">*</span></label>
+        <input type="email" class="form-input" id="acc-email" placeholder="로그인 및 비밀번호 찾기에 사용" autocomplete="off"/>
+      </div>
+      <div class="form-group">
+        <label id="acc-pw-label">비밀번호 <span class="req">*</span></label>
+        <input type="password" class="form-input" id="acc-pw" placeholder="비밀번호"/>
+        <div id="acc-pw-hint" style="display:none;font-size:11px;color:var(--text-3);margin-top:4px">입력 시 비밀번호 재설정 이메일을 발송합니다</div>
+      </div>
+      <div class="form-group">
+        <label>권한 <span class="req">*</span></label>
+        <select class="form-input" id="acc-role">
+          <option value="orderer">발주자</option>
+          <option value="admin">관리자</option>
+        </select>
+      </div>
+      <div class="form-group" id="acc-ecount-fields" style="display:none;border-top:1px solid #f1f5f9;padding-top:12px;margin-top:4px">
+        <label style="font-size:11px;color:var(--text-3);font-weight:600;letter-spacing:.5px">이카운트 연동</label>
+        <div style="margin-top:8px">
+          <label>사원코드</label>
+          <input type="text" class="form-input" id="acc-emp-cd" placeholder="담당자 코드"/>
+        </div>
+        <div style="margin-top:8px;margin-bottom:0">
+          <label>거래처코드</label>
+          <input type="text" class="form-input" id="acc-biz-cd" placeholder="거래처 코드"/>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('account-modal')">취소</button>
+      <button class="btn btn-primary" onclick="submitAccount()">저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- 색상별 이카운트 품목코드 모달 -->
+<div class="modal-overlay" id="color-prodcd-modal">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-header">
+      <span class="modal-title"><i class="fas fa-palette" style="color:#7c3aed;margin-right:8px"></i><span id="color-prodcd-modal-title">색상별 이카운트 품목코드</span></span>
+      <button class="modal-close" onclick="closeModal('color-prodcd-modal')"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body" style="max-height:65vh;overflow-y:auto">
+      <div style="font-size:12px;color:var(--text-3);margin-bottom:12px;padding:8px 10px;background:var(--bg);border-radius:var(--r-sm)">
+        색상별로 이카운트에 등록된 품목코드를 입력하세요. 발주 출고 시 선택된 색상에 맞는 코드로 자동 연동됩니다.
+      </div>
+      <div id="color-prodcd-rows"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('color-prodcd-modal')">취소</button>
+      <button class="btn btn-primary" onclick="saveColorProdCdMap()">저장</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/store/db.js"></script>
+<script src="js/utils/uiUtils.js"></script>
+<script src="js/utils/dateUtils.js"></script>
+<script src="js/utils.js"></script>
+<script src="js/price.js"></script>
+<script src="js/inventory.js"></script>
+<script src="js/orders.js"></script>
+<script src="js/order-modal.js"></script>
+    <script src="js/excel-print.js"></script>
+<script src="app.js"></script>
+</html>

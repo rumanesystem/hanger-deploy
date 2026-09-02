@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>이카운트 IP 모니터링 시스템 구축 보고서</title>
+<style>
+  @media print {
+    body { padding: 20mm; }
+    .no-print { display: none; }
+  }
+  body {
+    font-family: "Pretendard", -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 40px 30px;
+    background: #fff;
+    color: #1f2937;
+    line-height: 1.7;
+    font-size: 14px;
+  }
+  h1 {
+    font-size: 24px;
+    color: #1e3a8a;
+    border-bottom: 3px solid #1e3a8a;
+    padding-bottom: 12px;
+    margin-bottom: 4px;
+  }
+  .subtitle {
+    color: #6b7280;
+    font-size: 13px;
+    margin-bottom: 24px;
+  }
+  h2 {
+    font-size: 17px;
+    color: #1e40af;
+    border-left: 4px solid #3b82f6;
+    padding: 6px 12px;
+    margin-top: 32px;
+    background: #eff6ff;
+  }
+  p { margin: 8px 0; }
+  ul, ol { margin: 8px 0; padding-left: 24px; }
+  li { margin: 4px 0; }
+  code {
+    background: #f3f4f6;
+    color: #be123c;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-family: "Consolas", "Courier New", monospace;
+  }
+  .meta {
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    padding: 12px 18px;
+    margin-bottom: 24px;
+    font-size: 13px;
+  }
+  .meta div { margin: 4px 0; }
+  .meta dt { display: inline-block; min-width: 90px; color: #6b7280; font-weight: 600; }
+  .meta dd { display: inline; margin: 0; }
+  .btn-print {
+    background: #1e3a8a;
+    color: #fff;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 700;
+    margin-bottom: 20px;
+  }
+  .btn-print:hover { background: #1e40af; }
+</style>
+</head>
+<body>
+
+<button class="btn-print no-print" onclick="window.print()">🖨️ 인쇄 / PDF 저장</button>
+
+<h1>이카운트 IP 모니터링 보고서</h1>
+<p class="subtitle">발주앱 ↔ 이카운트 ERP 연동 안정화</p>
+
+<div class="meta">
+  <div><dt>작성일</dt><dd>2026-06-10</dd></div>
+  <div><dt>대상</dt><dd>발주앱 (Firebase + 이카운트 ERP)</dd></div>
+</div>
+
+<h2>1. 문제</h2>
+<p>발주서 출고확정 시 이카운트로 판매전표가 자동 생성되지 않음.</p>
+<p>원인: <strong>Firebase Cloud Function의 IP가 호출마다 바뀌어서 이카운트 IP 화이트리스트에 차단됨.</strong></p>
+
+<h2>2. 임시 운영 방식</h2>
+<p>정식 인프라(Railway 등) 이전 전까지는 <strong>IP가 바뀔 때마다 즉시 알림받아 등록하는 방식</strong>으로 운영.</p>
+
+<h2>3. 동작 방식</h2>
+<ol>
+  <li>Cloud Function이 <strong>10분마다</strong> 현재 IP 확인</li>
+  <li>이전과 다르면 <strong>슬랙 + 발주앱 관리자</strong>에 알림</li>
+  <li>관리자가 새 IP를 <strong>이카운트 ERP에 추가 등록</strong></li>
+</ol>
+
+<h2>4. 비용</h2>
+<p>모든 구성요소가 Firebase 무료 한도 내 + 슬랙 무료 → <strong>월 0원</strong></p>
+
+<h2>5. 향후 계획</h2>
+<ul>
+  <li><strong>Railway로 IP 고정 예정</strong></li>
+</ul>
+
+<p style="margin-top:40px;color:#9ca3af;font-size:11px;text-align:center;border-top:1px solid #e5e7eb;padding-top:20px">— 끝 —</p>
+
+</body>
+</html>
