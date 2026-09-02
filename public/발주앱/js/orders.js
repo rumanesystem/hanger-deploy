@@ -733,7 +733,17 @@ function openOrderConfirmModal(targetStatus){
   body.innerHTML=`<div style="max-height:65vh;overflow-y:auto;padding:4px">${docHtml}${shortageHtml}${noticeHtml}</div>`;
 
   const okBtn=document.getElementById('order-confirm-ok-btn');
-  if(okBtn){okBtn.onclick=()=>{closeModal('order-confirm-modal');submitOrder(_targetStatus);};}
+  if(okBtn){
+    // [2026-09-02 S1 dedup] rapid 연타로 발주 중복 생성 방지 (스테이징 adversarial S1)
+    //   각 openOrderConfirmModal 호출마다 fresh closure → 재열면 자동 리셋
+    let _submitting=false;
+    okBtn.onclick=()=>{
+      if(_submitting) return;
+      _submitting=true;
+      closeModal('order-confirm-modal');
+      submitOrder(_targetStatus);
+    };
+  }
   openModal('order-confirm-modal');
 }
 
