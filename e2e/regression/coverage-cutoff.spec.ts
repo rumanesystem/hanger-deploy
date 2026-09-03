@@ -37,6 +37,10 @@ test("커버리지: getSettlementDate + orders.js 출고일 셀 로직", async (
       { orderDate: "2026-09-15", shipDate: "2026-09-25", statusHistory: [{ status: "발주확정", changedAt: "2026-09-16T00:00:00Z" }, { status: "발주대기", changedAt: "2026-09-18T00:00:00Z" }, { status: "발주확정", changedAt: "2026-09-20T00:00:00Z" }] },
       { orderDate: "2026-09-01", shipDate: "2026-08-20", statusHistory: [{ status: "발주확정", changedAt: "2026-08-19T00:00:00Z" }] },
       { orderDate: "2026-09-15", shipDate: null, statusHistory: null },
+      // [100% coverage] defensive branch #1: statusHistory 안에 발주확정 아닌 이벤트 있음 → continue 밟음
+      { orderDate: "2026-09-15", shipDate: "2026-09-20", statusHistory: [{ status: "발주대기", changedAt: "2026-09-16T00:00:00Z" }, { status: "발주확정", changedAt: "2026-09-17T00:00:00Z" }] },
+      // [100% coverage] defensive branch #2: orderDate=0000 + statusHistory 없음 + shipDate 무효 → 마지막 ternary "? ''" 밟음
+      { orderDate: "0000-00-00", shipDate: "0000-00-00", statusHistory: [] },
     ];
     return cases.map(c => getSD(c));
   });
@@ -99,7 +103,7 @@ test("커버리지: getSettlementDate + orders.js 출고일 셀 로직", async (
       const total = gsdFn.ranges.length;
       const pct = total > 0 ? executed / total * 100 : 0;
       console.log(`[assert] getSettlementDate branch: ${executed}/${total} = ${pct.toFixed(1)}%`);
-      expect(pct, `getSettlementDate branch coverage >= 80%`).toBeGreaterThanOrEqual(80);
+      expect(pct, `getSettlementDate branch coverage 100%`).toBe(100);
     }
   }
 });
