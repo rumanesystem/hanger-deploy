@@ -483,13 +483,16 @@ function setLoginTab(tab){
   document.getElementById('login-id').focus();
 }
 
-// ── 로컬 전용 테스트 계정 전환기 ─────────────────────────────
+// ── 로컬/스테이징 전용 테스트 계정 전환기 ─────────────────────────────
 // 운영 안전장치:
-// 1) localhost/127.0.0.1 에서만 버튼 생성
-// 2) 함수 실행 시에도 다시 한 번 localhost 검사
+// 1) localhost/127.0.0.1/스테이징(hanger-test-260901.web.app) 에서만 버튼 생성
+// 2) 함수 실행 시에도 다시 한 번 검사
+// [2026-09-03] 스테이징 도메인 추가 (사용자 QA 편의). 운영(hanger-deploy) 은 계속 차단.
 function isLocalTestHost_(){
   const h=location.hostname;
-  return h==='localhost'||h==='127.0.0.1'||h==='[::1]';
+  if(h==='localhost'||h==='127.0.0.1'||h==='[::1]')return true;
+  if(h==='hanger-test-260901.web.app'||h==='hanger-test-260901.firebaseapp.com')return true;
+  return false;
 }
 
 const LOCAL_TEST_SWITCH_ACCOUNTS=[
@@ -2527,11 +2530,8 @@ if(typeof window!=='undefined'){
 }
 
 // [2026-07-24 Codex] localhost/127.0.0.1에서만 DB를 window에 노출 (E2E·QA 편의)
-// [스테이징 전용] hanger-test-* 도 e2e 편의로 노출 (원본은 unchanged, 이 파일은 발주앱-staging/)
 // 운영 hosting에서는 노출 X — 콘솔 조작 공격면 축소
 if(typeof window!=='undefined'){
   const _h=(location&&location.hostname)||'';
-  const _isLocal = _h==='localhost'||_h==='127.0.0.1';
-  const _isStaging = /^hanger-test-.*\.web\.app$/.test(_h) || /^hanger-test-.*\.firebaseapp\.com$/.test(_h);
-  if(_isLocal||_isStaging) window.DB=DB;
+  if(_h==='localhost'||_h==='127.0.0.1') window.DB=DB;
 }
