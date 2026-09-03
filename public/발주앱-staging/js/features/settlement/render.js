@@ -293,7 +293,20 @@ function renderOrderRow(o) {
       <td class="center col-warehouse"><span class="badge ${whClass}">${escapeHtml(o.warehouse)}</span></td>
       <td class="center col-date" style="font-size:12px">${(()=>{
         // [2026-08-27] 정산 기준 = 출고 확정 시점(관리자 클릭). getSettlementDate로 통일 (필터·정렬과 동일)
-        const _confirmed = (typeof getSettlementDate === 'function') ? getSettlementDate(o) : '';
+        // [2026-09-03 셀프체크 fix] getSettlementDate 가 pre-cutoff 옛 발주에 orderDate 반환하도록 바뀌면서
+        //   출고 셀 UI에 orderDate 표시되는 이상 발생. display 전용 로직 인라인 (orders.js:1155 동일 패턴).
+        let _confirmed = '';
+        const _sh = Array.isArray(o.statusHistory) ? o.statusHistory : [];
+        for (let _i = 0; _i < _sh.length; _i++) {
+          const _e = _sh[_i];
+          if (!_e || _e.status !== '발주확정') continue;
+          const _kst = (typeof _toKstDateStr === 'function') ? _toKstDateStr(_e.changedAt) : null;
+          if (_kst) { _confirmed = (typeof coerceDateForFilter === 'function') ? coerceDateForFilter(_kst) : _kst; break; }
+        }
+        if (!_confirmed) {
+          const _rawShip = o.shipDate || '';
+          if (_rawShip && _rawShip !== '0000-00-00') _confirmed = _rawShip;
+        }
         const _shipTop = _confirmed
           ? `<i class="fas fa-truck" style="margin-right:2px"></i>${fmtShortDate(_confirmed)}`
           : `<span style="color:#b45309"><i class="fas fa-truck" style="margin-right:2px"></i>출고 미정</span>`;

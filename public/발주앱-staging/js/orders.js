@@ -1163,7 +1163,8 @@ function renderOrders(){
         if(_kst){_shipDateForCell=(typeof coerceDateForFilter==='function')?coerceDateForFilter(_kst):_kst;break;}
       }
       if(!_shipDateForCell){
-        const _rawShip=o.shipDate||'';
+        // [Codex P2] 미정규 shipDate ("26-6-15") 방어
+        const _rawShip=(typeof coerceDateForFilter==='function')?coerceDateForFilter(o.shipDate||''):(o.shipDate||'');
         if(_rawShip&&_rawShip!=='0000-00-00')_shipDateForCell=_rawShip;
       }
       const _shipCell=_shipDateForCell?fmt(_shipDateForCell):'-';
