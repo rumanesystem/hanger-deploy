@@ -36,3 +36,5 @@ playwright-report/
 /functions/_tmp_*.js
 # 운영 스냅샷 (배포 전후 갯수 비교용, 개인정보 포함 가능 — 로컬만 보관)
 .snapshots/
+# 로컬 draft 테스트 스크립트 (세션 토큰 하드코딩 가능성 — Codex P1 지적)
+/draft-*.mjs

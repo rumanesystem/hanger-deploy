@@ -733,7 +733,17 @@ function openOrderConfirmModal(targetStatus){
   body.innerHTML=`<div style="max-height:65vh;overflow-y:auto;padding:4px">${docHtml}${shortageHtml}${noticeHtml}</div>`;
 
   const okBtn=document.getElementById('order-confirm-ok-btn');
-  if(okBtn){okBtn.onclick=()=>{closeModal('order-confirm-modal');submitOrder(_targetStatus);};}
+  if(okBtn){
+    // [2026-09-02 S1 dedup] rapid 연타로 발주 중복 생성 방지 (스테이징 adversarial S1)
+    //   각 openOrderConfirmModal 호출마다 fresh closure → 재열면 자동 리셋
+    let _submitting=false;
+    okBtn.onclick=()=>{
+      if(_submitting) return;
+      _submitting=true;
+      closeModal('order-confirm-modal');
+      submitOrder(_targetStatus);
+    };
+  }
   openModal('order-confirm-modal');
 }
 
@@ -1142,7 +1152,20 @@ function renderOrders(){
       const _esc=(typeof escapeHtml==='function'?escapeHtml:(s=>String(s||'')));
       const cancelReasonCell=orderListSubTab==='cancelled'?`<td class="td-muted" style="font-size:12px;color:#dc2626;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${_esc(o.cancelReason||'')}">${_esc(o.cancelReason||'-')}</td>`:'';
       // [2026-08-27] 출고일 셀: 확정 시 statusHistory 발주확정 changedAt(KST), 미확정이면 발주자 shipDate, 둘 다 없으면 '-'
-      const _shipDateForCell=(typeof getSettlementDate==='function')?getSettlementDate(o):(o.shipDate||'');
+      // [2026-09-03 Codex P1 fix] 이전엔 getSettlementDate 재사용했으나 그 함수가 pre-cutoff 옛 발주에 orderDate 반환하도록 바뀌면서
+      //   출고일 셀에 잘못된 값(발주일) 표시됨. display 전용 로직 인라인.
+      let _shipDateForCell='';
+      const _sh=Array.isArray(o.statusHistory)?o.statusHistory:[];
+      for(let _i=0;_i<_sh.length;_i++){
+        const _e=_sh[_i];
+        if(!_e||_e.status!=='발주확정')continue;
+        const _kst=(typeof _toKstDateStr==='function')?_toKstDateStr(_e.changedAt):null;
+        if(_kst){_shipDateForCell=(typeof coerceDateForFilter==='function')?coerceDateForFilter(_kst):_kst;break;}
+      }
+      if(!_shipDateForCell){
+        const _rawShip=o.shipDate||'';
+        if(_rawShip&&_rawShip!=='0000-00-00')_shipDateForCell=_rawShip;
+      }
       const _shipCell=_shipDateForCell?fmt(_shipDateForCell):'-';
       return `<tr class="order-row" data-order-id="${o.id}" style="cursor:pointer" title="클릭하여 상세 보기"><td class="td-name">${dTo}</td><td class="td-muted" style="font-size:12px">${addr}</td><td style="font-size:12px;font-weight:600;color:#0f172a">${orderNumEsc}${lockBadge}</td><td class="td-muted">${fmt(o.orderDate)}</td><td class="td-muted">${_shipCell}</td><td class="td-center">${statusBadge}</td><td class="td-center td-muted">${fmt(o.createdAt)}</td>${cancelReasonCell}<td class="td-center">${cancelBtn} ${uncancelBtn} ${reorderBtn} ${invoiceBtn}</td></tr>`;
     }).join('')}</tbody></table></div>`;

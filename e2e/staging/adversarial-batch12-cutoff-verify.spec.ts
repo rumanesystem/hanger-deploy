@@ -1,5 +1,9 @@
 /**
  * [스테이징 컷오프 정책 검증] 2026-09-01 기준 정책 정확성
+ * ⚠️ 실행 전제: dateUtils.js 컷오프 fix 가 스테이징에 배포된 후에만 통과.
+ *   미배포 상태에서는 K1/K1c 실패 (스테이징 아직 shipDate 우선). Codex P1 지적.
+ * 로컬 회귀는 e2e/regression/cutoff-fix-orderdate.spec.ts 참조.
+ *
  * 배포 전 마지막 확인: 신규 발주 (orderDate >= 2026-09-01) 는 새 정책,
  * 옛 발주 (orderDate < 2026-09-01) 는 옛 정책 유지
  *
@@ -47,14 +51,19 @@ test.describe("[스테이징 컷오프 정책 검증]", () => {
 
       const cases = [
         {
-          name: "K1 옛 발주 (2026-08-15) → 옛 규칙 shipDate 우선",
+          name: "K1 옛 발주 (2026-08-15) → orderDate 우선 (운영 기존 정책)",
           order: { orderDate: "2026-08-15", shipDate: "2026-08-20", statusHistory: [] },
-          expected: "2026-08-20",
+          expected: "2026-08-15",
         },
         {
-          name: "K1b 옛 발주, shipDate=0000-00-00 → orderDate 폴백",
+          name: "K1b 옛 발주, shipDate=0000-00-00 → orderDate",
           order: { orderDate: "2026-08-15", shipDate: "0000-00-00", statusHistory: [] },
           expected: "2026-08-15",
+        },
+        {
+          name: "K1c 옛 발주 8월 + shipDate 9월 → orderDate (8월 정산 유지, 회계 안 흔들림)",
+          order: { orderDate: "2026-08-10", shipDate: "2026-09-05", statusHistory: [] },
+          expected: "2026-08-10",
         },
         {
           name: "K2 컷오프 정각 (2026-09-01), statusHistory 확정일 있음 → 확정일",
@@ -92,11 +101,11 @@ test.describe("[스테이징 컷오프 정책 검증]", () => {
         {
           name: "K7 옛 발주였다가 orderDate 편집으로 컷오프 이후로 이동 → statusHistory 첫 확정일 우선",
           order: {
-            orderDate: "2026-09-01", // 편집됨
+            orderDate: "2026-09-01", // 편집됨 → 컷오프 이후 진입
             shipDate: "2026-08-20",  // 원래 옛 shipDate
             statusHistory: [{ status: "발주확정", changedAt: "2026-08-19T00:00:00Z" }], // 옛 확정
           },
-          expected: "2026-08-19", // 옛 확정일 유지 → 회계 안 흔들림
+          expected: "2026-08-19", // 새 정책 적용 → statusHistory 첫 확정일
         },
       ];
 
