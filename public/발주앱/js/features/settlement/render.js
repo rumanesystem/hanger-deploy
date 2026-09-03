@@ -228,7 +228,12 @@ function renderCustomerDetailTable(orders) {
   const sorted = [...orders].sort((a,b)=>{
     const da=getSettlementDate(a);
     const db=getSettlementDate(b);
-    return settlementSortOrder === 'asc' ? da.localeCompare(db) : db.localeCompare(da);
+    const cmp = settlementSortOrder === 'asc' ? da.localeCompare(db) : db.localeCompare(da);
+    if (cmp !== 0) return cmp;
+    // 같은 정산일이면 발주번호로 tiebreaker (정렬 방향 따름)
+    const na = String(a.orderNum || '');
+    const nb = String(b.orderNum || '');
+    return settlementSortOrder === 'asc' ? na.localeCompare(nb) : nb.localeCompare(na);
   });
   const rowsHTML = sorted.map((o, i) => {
     const row = renderOrderRow(o);
