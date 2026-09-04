@@ -2647,9 +2647,11 @@ if(typeof window!=='undefined'){
   window.deleteDraft=deleteDraft;
 }
 
-// [2026-07-24 Codex] localhost/127.0.0.1에서만 DB를 window에 노출 (E2E·QA 편의)
-// 운영 hosting에서는 노출 X — 콘솔 조작 공격면 축소
+// [2026-07-24 Codex] localhost/127.0.0.1/스테이징 에서만 DB를 window에 노출 (E2E·QA 편의)
+// [2026-09-04 fix] 이전 커밋에서 staging 미러 파일의 스테이징 expose 가 실수로 제거됐던 것 복구.
+// 운영(hanger-deploy) 에서는 계속 노출 X — 콘솔 조작 공격면 축소.
 if(typeof window!=='undefined'){
   const _h=(location&&location.hostname)||'';
-  if(_h==='localhost'||_h==='127.0.0.1') window.DB=DB;
+  const _allow=(_h==='localhost'||_h==='127.0.0.1'||_h==='[::1]'||_h==='hanger-test-260901.web.app'||_h==='hanger-test-260901.firebaseapp.com');
+  if(_allow) window.DB=DB;
 }
