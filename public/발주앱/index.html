@@ -572,13 +572,23 @@
             throw new Error('[collectionAdd 실패] '+coll+': '+(e&&e.message));
           }
         },
-        async collectionGet(coll) {
+        async collectionGet(coll, opts) {
           try {
-            const snaps = await db.collection(coll).get();
+            const forceServer = !!(opts && opts.fromServer);
+            const snaps = forceServer
+              ? await db.collection(coll).get({ source: 'server' })
+              : await db.collection(coll).get();
+            if (forceServer && snaps.metadata && snaps.metadata.fromCache) {
+              throw new Error('서버 응답이 캐시로 폴백되었습니다. 네트워크 확인 후 다시 시도해주세요. ('+coll+')');
+            }
             const arr = [];
             snaps.forEach(d => arr.push(d.data()));
             return arr;
-          } catch(e) { console.warn('[collectionGet 실패]', coll, e.message); return []; }
+          } catch(e) {
+            if (opts && opts.fromServer) throw e;
+            console.warn('[collectionGet 실패]', coll, e.message);
+            return [];
+          }
         },
         // 발주 상태 확인과 명세서 배열 변경을 한 transaction으로 처리한다.
         // mutator는 { order, invoices }를 받아 { invoices, result, revision? }을 반환한다.

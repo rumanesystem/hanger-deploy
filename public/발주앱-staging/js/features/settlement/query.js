@@ -36,11 +36,22 @@ const MOCK_ORDERS = [
  * @returns {Promise<Order[]>}
  */
 async function fetchCompletedOrders(filter) {
-  // 발주앱 메인 통합 환경: DB.get으로 메모리 캐시(syncFromServer 후)에서 즉시 반환
-  // _FS 없는 환경(없을 일은 거의 없음)에선 빈 배열
-  const allOrders = (typeof DB !== 'undefined' && typeof DB.get === 'function')
-    ? DB.get('orders', [])
-    : [];
+  const adminView = (typeof isAdmin === 'function') && isAdmin();
+  let allOrders = [];
+  if (adminView) {
+    allOrders = (typeof DB !== 'undefined' && typeof DB.get === 'function')
+      ? DB.get('orders', [])
+      : [];
+  } else {
+    if (typeof window === 'undefined' || !window._FS || typeof window._FS.getAllOrders !== 'function') return [];
+    try {
+      allOrders = await window._FS.getAllOrders({ fromServer: true });
+    } catch (e) {
+      console.warn('[settlement] 발주자용 orders 서버 조회 실패 → 차단:', e && e.message);
+      return [];
+    }
+  }
+  if (!Array.isArray(allOrders)) return [];
   const invoiceMap = await _fetchSettlementInvoiceMap();
   return allOrders.filter(o => {
     if (!o) return false;
@@ -48,8 +59,18 @@ async function fetchCompletedOrders(filter) {
     // [2026-08-31] 정책 변경: 출고확정만으로 발주자한테도 정산 표시
     //   기존엔 관리자가 [전송] 별도 클릭 → 명세서 sentToCustomer:true 되어야 발주자한테 보였음.
     //   신규: 관리자 [전송] 버튼 없앰. 출고확정 = 곧 발주자한테 노출. UX 단순화.
+    // [2026-09-04] 컷오프 도입: orderDate < '2026-09-01' 옛 발주는 옛 정책 유지
+    //   (관리자 [전송] 눌러야 발주자 정산 목록에 뜸). 8월 이하 미전송 명세서 자동노출 방지.
     // [2026-08-26] 발주대기(화면 '출고대기') 제외 → 관리자 '출고 확정' 이후만 정산 편입
     if (o.status !== '출고완료' && o.status !== '발주확정') return false;
+    if (!adminView) {
+      const _autoP = (typeof isInvoiceAutoVisiblePolicy === 'function') ? isInvoiceAutoVisiblePolicy(o) : false;
+      if (!_autoP) {
+        // 옛 정책: sentToCustomer=true 인 활성 invoice 있어야 발주자에게 노출
+        const _inv = o.orderNum ? invoiceMap[o.orderNum] : null;
+        if (!_inv || !_inv.sentToCustomer) return false;
+      }
+    }
     const dateField = getSettlementDate(o);
     if (!dateField) return false;
     if (dateField < filter.range.startDate || dateField > filter.range.endDate) return false;
@@ -60,15 +81,26 @@ async function fetchCompletedOrders(filter) {
 }
 
 async function _fetchSettlementInvoiceMap() {
+  const adminView = (typeof isAdmin === 'function') && isAdmin();
   let invoices = [];
-  if (typeof DB !== 'undefined' && typeof DB.get === 'function') {
-    invoices = DB.get('invoices', []);
-  }
-  if ((!Array.isArray(invoices) || invoices.length === 0) && typeof window !== 'undefined' && window._FS && typeof window._FS.get === 'function') {
+  if (!adminView) {
+    if (typeof window === 'undefined' || !window._FS || typeof window._FS.get !== 'function') return {};
     try {
-      invoices = await window._FS.get('invoices');
+      invoices = await window._FS.get('invoices', { fromServer: true });
     } catch (e) {
-      console.warn('[settlement] invoices fetch 실패:', e && e.message);
+      console.warn('[settlement] 발주자용 invoices 서버 조회 실패 → 차단:', e && e.message);
+      return {};
+    }
+  } else {
+    if (typeof DB !== 'undefined' && typeof DB.get === 'function') {
+      invoices = DB.get('invoices', []);
+    }
+    if ((!Array.isArray(invoices) || invoices.length === 0) && typeof window !== 'undefined' && window._FS && typeof window._FS.get === 'function') {
+      try {
+        invoices = await window._FS.get('invoices');
+      } catch (e) {
+        console.warn('[settlement] invoices fetch 실패:', e && e.message);
+      }
     }
   }
   const map = {};
@@ -76,7 +108,6 @@ async function _fetchSettlementInvoiceMap() {
   //   기존: 발주자는 sentToCustomer:true인 invoice 금액만 봄 → 목록엔 있는데 금액이 order 원본
   //   신규: 활성 invoice 있으면 그 금액 사용 (목록/금액 정책 통일)
   //   단 needsManualReview 상태 invoice는 관리자 재검토 대기 → 발주자한테 stale 금액 노출 금지
-  const adminView = (typeof isAdmin === 'function') && isAdmin();
   (Array.isArray(invoices) ? invoices : []).forEach(inv => {
     if (!inv || !inv.orderNum || inv.cancelled) return;
     if (!adminView && inv.needsManualReview) return;

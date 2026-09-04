@@ -71,6 +71,35 @@ function _toKstDateStr(raw) {
 // [2026-08-31] 정책 A 적용 컷오프: orderDate >= '2026-09-01'인 신규 발주서만 새 정책.
 //   그 이전 발주서는 옛 규칙 (shipDate → orderDate) 유지 → 회계 마감된 옛 정산월 안 흔들림.
 const SETTLEMENT_POLICY_A_CUTOFF = '2026-09-01';
+
+// [2026-09-04] 명세서 자동노출 정책 컷오프 (orderDate 기준).
+//   컷오프 이전 발주(예: 8월): 옛 정책 — 관리자 [전송] 눌러야 발주자에게 노출 (sentToCustomer=true 필요).
+//     8월 이하 미전송 명세서 다수 → 배포 후 갑자기 발주자에게 뜨는 사고 방지.
+//   컷오프 이후 발주: 신 정책 (14e0d6d) — 출고확정만으로 발주자 자동 노출.
+const INVOICE_AUTO_VISIBLE_CUTOFF = '2026-09-01';
+
+// 발주가 자동노출 정책 대상인지 판정 (orderDate 기준). true = 자동노출, false = 옛 sentToCustomer 게이트 필요.
+// [2026-09-04 Codex fix] fail-closed: 이번 정책의 최우선 목적 = 옛 미전송 발주의 갑작스러운 노출 방지.
+//   누락·비정상 형식은 옛 정책(false)으로 처리 → 안전한 쪽 (관리자 [전송] 필요).
+//   YYYY-MM-DD 정규 매치 안 되면 옛 발주로 간주.
+function isInvoiceAutoVisiblePolicy(order) {
+  if (!order) return false;
+  const _raw = order.orderDate;
+  // [2026-09-04 Codex v2 fix] slice 전 원문 검증 — '2026-09-01junk', ISO datetime, '2026-99-99' 등 우회 차단
+  if (typeof _raw !== 'string') return false;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(_raw)) return false;
+  if (_raw === '0000-00-00') return false;
+  // 달력상 유효 검증 (예: 2026-02-30 은 Date 파싱 시 다른 값 → 원본과 불일치 → 거부)
+  const _parts = _raw.split('-').map(Number);
+  const _d = new Date(_parts[0], _parts[1] - 1, _parts[2]);
+  if (_d.getFullYear() !== _parts[0] || (_d.getMonth() + 1) !== _parts[1] || _d.getDate() !== _parts[2]) return false;
+  return _raw >= INVOICE_AUTO_VISIBLE_CUTOFF;
+}
+if (typeof window !== 'undefined') {
+  window.INVOICE_AUTO_VISIBLE_CUTOFF = INVOICE_AUTO_VISIBLE_CUTOFF;
+  window.isInvoiceAutoVisiblePolicy = isInvoiceAutoVisiblePolicy;
+}
+
 function getSettlementDate(order) {
   if (!order) return '';
   // [2026-09-03 fix] 컷오프 이전 발주서: orderDate 우선 (운영 기존 정책 유지).

@@ -287,7 +287,20 @@ function renderOrderRow(o) {
     return !!deliveryName && orderDelivery === deliveryName;
   })();
   // [2026-08-31] 정책 변경: 출고확정만으로 발주자 노출 → 별도 [전송] 버튼 무의미 → 제거
-  const sendButton = '';
+  // [2026-09-04] 컷오프 도입: orderDate < '2026-09-01' 옛 발주는 [전송] 버튼 조건부 복원 (관리자만).
+  const _autoPolicyRow = (typeof isInvoiceAutoVisiblePolicy === 'function') ? isInvoiceAutoVisiblePolicy(o) : false;
+  let sendButton = '';
+  if (canEditSettlement && !_autoPolicyRow) {
+    // 옛 정책 발주: sentToCustomer 토글 버튼 복원
+    const _activeInvs = (typeof DB !== 'undefined' && typeof DB.get === 'function' ? DB.get('invoices', []) : [])
+      .filter(i => i && !i.cancelled && i.orderNum === o.orderNum);
+    const _sent = _activeInvs.length > 0 && _activeInvs[_activeInvs.length - 1].sentToCustomer;
+    const _label = _sent ? '<i class="fas fa-check-circle"></i> 전송됨' : '<i class="fas fa-paper-plane"></i> 전송';
+    const _style = _sent
+      ? 'margin-left:4px;padding:4px 8px;font-size:12px;border:1px solid #16a34a;background:#16a34a;color:#fff;border-radius:4px;cursor:pointer;font-weight:700'
+      : 'margin-left:4px;padding:4px 8px;font-size:12px;border:1px solid #16a34a;background:#fff;color:#16a34a;border-radius:4px;cursor:pointer;font-weight:700';
+    sendButton = `<button class="btn-invoice-send" data-action="toggle-send" data-order-num="${escapeHtml(o.orderNum)}" title="발주자에게 전송 / 전송 취소" style="${_style}">${_label}</button>`;
+  }
   const invoiceButton = canOpenInvoice
     ? `<button class="btn-invoice" data-action="open-invoice" data-order-id="${o.id}"><i class="fas fa-file-invoice"></i> 거래명세서</button>`
     : '<span style="font-size:11px;color:var(--text-3)">-</span>';
@@ -341,6 +354,9 @@ if (typeof document !== 'undefined' && !document._settlementBtnDelegated) {
       startInlineEdit(Number(btn.dataset.orderId));
     } else if (action === 'goto-order' && typeof goToOrder === 'function') {
       goToOrder(btn.dataset.orderNum);
+    } else if (action === 'toggle-send') {
+      // [2026-09-04] 컷오프 이전 옛 발주에만 렌더되는 [전송] 버튼 (관리자 전용)
+      toggleInvoiceSendFromSettlement(btn.dataset.orderNum);
     } else if (action === 'load-more') {
       // 페이지네이션 — 다음 N건 .hidden-row 제거 (search-hidden 행은 제외)
       const table = btn.closest('.detail-table-wrap')?.querySelector('.detail-table');
@@ -660,6 +676,18 @@ async function openInvoiceFromSettlement(orderId) {
   }
   // [2026-08-31] 정책 변경: 출고확정만으로 발주자한테 명세서 노출 (sentToCustomer 게이트 제거)
   //   본인 발주 검증은 openFromOrder 내부에서 createdBy 체크
+  // [2026-09-04] 컷오프 이전 옛 발주는 발주자 조회 시 sentToCustomer=true 필수 (옛 정책 유지)
+  const _autoPolicyOpen = (typeof isInvoiceAutoVisiblePolicy === 'function') ? isInvoiceAutoVisiblePolicy(order) : false;
+  const _isAdminUser = (typeof isAdmin === 'function') && isAdmin();
+  if (!_isAdminUser && !_autoPolicyOpen) {
+    const invs = (typeof DB !== 'undefined' && typeof DB.get === 'function') ? DB.get('invoices', []) : [];
+    const _hasSent = invs.some(i => i && !i.cancelled && i.orderNum === order.orderNum && i.sentToCustomer);
+    if (!_hasSent) {
+      if (typeof toast === 'function') toast('관리자가 전송한 거래명세서만 볼 수 있습니다.', 'error');
+      else alert('관리자가 전송한 거래명세서만 볼 수 있습니다.');
+      return;
+    }
+  }
   if (!window.LumaneInvoice || typeof window.LumaneInvoice.openFromOrder !== 'function') {
     if (typeof toast === 'function') toast('거래명세서 모듈 로드 실패. 새로고침 후 다시 시도하세요.', 'error');
     else alert('거래명세서 모듈 로드 실패. 새로고침 후 다시 시도하세요.');
@@ -671,6 +699,31 @@ async function openInvoiceFromSettlement(orderId) {
 // [2026-09-01] toggleInvoiceSendFromSettlement 제거 —
 //   전송 버튼 자체가 render에서 사라지고 (sendButton=''), 이벤트 위임의
 //   'toggle-send' 분기도 삭제됨. 이제 도달 불가능한 함수라 삭제.
+// [2026-09-04] 부분 복원 — 컷오프 이전 발주 (isInvoiceAutoVisiblePolicy=false) 에만 [전송] 버튼 다시 렌더.
+async function toggleInvoiceSendFromSettlement(orderNum) {
+  if (!orderNum) return;
+  if (typeof isAdmin !== 'function' || !isAdmin()) return;
+  if (!window.LumaneInvoice || typeof window.LumaneInvoice.setSentByOrderNum !== 'function') {
+    if (typeof toast === 'function') toast('명세서 모듈 로드 실패. 새로고침 후 다시 시도하세요.', 'error');
+    return;
+  }
+  // 현재 sentToCustomer 상태 반대로 토글
+  const invs = (typeof DB !== 'undefined' && typeof DB.get === 'function') ? DB.get('invoices', []) : [];
+  const active = invs.filter(i => i && !i.cancelled && i.orderNum === orderNum);
+  if (active.length === 0) {
+    if (typeof toast === 'function') toast('명세서가 아직 없습니다. 먼저 명세서를 생성해주세요.', 'warning');
+    return;
+  }
+  const currentlySent = active[active.length - 1].sentToCustomer;
+  const nextSent = !currentlySent;
+  try {
+    await window.LumaneInvoice.setSentByOrderNum(orderNum, nextSent);
+    // 렌더 갱신
+    if (typeof renderSettlement === 'function') renderSettlement();
+  } catch (e) {
+    console.warn('[settlement] 전송 상태 토글 실패:', e && e.message);
+  }
+}
 
 async function exportExcel() {
   if (typeof isAdmin !== 'function' || !isAdmin()) {

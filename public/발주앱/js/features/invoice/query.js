@@ -165,9 +165,12 @@ async function saveInvoice(invoice) {
  * @param {string} orderNum
  * @returns {Promise<Invoice[]>}
  */
-async function getInvoicesByOrderNum(orderNum) {
+async function getInvoicesByOrderNum(orderNum, opts) {
   if (!window._FS) { console.warn('[Invoice] _FS 미초기화 — 빈 배열 반환'); return []; }
-  const list = await window._FS.get(INVOICE_DOC_KEY);
+  // [2026-09-04 Codex v3 fix] opts.fromServer=true 시 캐시 우회 서버 최신 강제
+  const list = (opts && opts.fromServer)
+    ? await window._FS.get(INVOICE_DOC_KEY, { fromServer: true })
+    : await window._FS.get(INVOICE_DOC_KEY);
   if (!Array.isArray(list)) { console.warn('[Invoice] invoices 문서 없음 — 빈 배열 반환'); return []; }
   return list.filter(inv => inv && inv.orderNum === orderNum);
 }

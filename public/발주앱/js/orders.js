@@ -1184,8 +1184,19 @@ function renderOrders(){
       const reorderBtn=_rowIsDraft?'':`<button class="btn btn-outline btn-xs reorder-btn" data-order-id="${o.id}" title="이 발주서로 재발주" style="border:1.5px solid #0ea5e9;color:#0369a1;font-weight:700;white-space:nowrap"><i class="fas fa-rotate-right"></i> 재발주</button>`;
       // [2026-08-31] 정책 변경: 출고확정만으로 발주자한테 명세서 버튼 노출 (sentToCustomer 무관)
       //   발주대기 상태는 아직 출고확정 전 → 발주자한테 명세서 안 뜸 (관리자만)
+      // [2026-09-04] 컷오프 도입: orderDate < '2026-09-01' 옛 발주는 옛 정책 (sentToCustomer 게이트) 유지.
       const _statusOK=(o.status==='출고완료'||o.status==='발주확정'||o.status==='발주대기');
-      const _isOrdererVisible=(o.status==='출고완료'||o.status==='발주확정'); // 발주자 노출 = 출고확정 이후만
+      const _isOrdererVisibleStatus=(o.status==='출고완료'||o.status==='발주확정');
+      const _autoPolicy=(typeof isInvoiceAutoVisiblePolicy==='function')?isInvoiceAutoVisiblePolicy(o):false;
+      let _isOrdererVisible;
+      if (_autoPolicy) {
+        _isOrdererVisible = _isOrdererVisibleStatus;
+      } else {
+        // 옛 정책: sentToCustomer=true 인 활성 명세서 있어야 노출
+        const _acts = (_invList||[]).filter(inv=>inv && !inv.cancelled && inv.orderNum===o.orderNum);
+        const _hasSent = _acts.some(inv=>inv.sentToCustomer);
+        _isOrdererVisible = _isOrdererVisibleStatus && _hasSent;
+      }
       // [2026-09-01] legacy fallback — settlement/query.js:_canViewSettlementOrder와 동일 로직
       const _isOwnerRow = (()=>{
         if (!currentUser) return false;
@@ -1830,8 +1841,18 @@ function openOrderDetail(orderId){
     }
     // [2026-08-31] 정책 변경: 출고확정만으로 발주자 명세서 버튼 노출 (sentToCustomer 무관)
     //   발주대기는 관리자만 (발주자한테는 출고확정 후에만)
+    // [2026-09-04] 컷오프: orderDate < '2026-09-01' 옛 발주는 sentToCustomer 게이트 유지
     const _statusOK=(order.status==='출고완료'||order.status==='발주확정'||order.status==='발주대기');
-    const _isOrdererVisibleDetail=(order.status==='출고완료'||order.status==='발주확정');
+    const _isOrdererVisibleStatus=(order.status==='출고완료'||order.status==='발주확정');
+    const _autoPolicyD=(typeof isInvoiceAutoVisiblePolicy==='function')?isInvoiceAutoVisiblePolicy(order):false;
+    let _isOrdererVisibleDetail;
+    if (_autoPolicyD) {
+      _isOrdererVisibleDetail = _isOrdererVisibleStatus;
+    } else {
+      const _invsD = (typeof DB!=='undefined'&&typeof DB.get==='function'?DB.get('invoices',[]):[]);
+      const _hasSentD = _invsD.some(inv=>inv && !inv.cancelled && inv.orderNum===order.orderNum && inv.sentToCustomer);
+      _isOrdererVisibleDetail = _isOrdererVisibleStatus && _hasSentD;
+    }
     const _canSeeInvDetail=isAdmin()?_statusOK:(_isOwner && _isOrdererVisibleDetail);
     if(_canSeeInvDetail){
       const leftBtns=document.querySelector('#order-detail-modal .modal-footer > div');

@@ -3,9 +3,9 @@
 // 의존: types.js, utils.js, query.js, render.js, pdf.js, print.js
 // ============================================================
 
-// [2026-08-31] canonical order 조회 헬퍼 — 서버 fresh 우선, 로컬 fallback
+// [2026-08-31] canonical order 조회 헬퍼 — 서버 fresh 우선, 관리자용 로컬 fallback
 //   목적: 다른 클라이언트 unlock/cancel 후 stale cache 방지
-async function _fetchCanonicalOrder(orderNum) {
+async function _fetchCanonicalOrder(orderNum, options = {}) {
   let _canonical = null;
   if (window._FS && typeof window._FS.getAllOrders === 'function') {
     try {
@@ -13,7 +13,7 @@ async function _fetchCanonicalOrder(orderNum) {
       if (Array.isArray(_fresh)) _canonical = _fresh.find(o => o && o.orderNum === orderNum) || null;
     } catch (_e) {}
   }
-  if (!_canonical) {
+  if (!_canonical && !options.fromServerOnly) {
     try {
       const _localOrders = (typeof DB !== 'undefined' && typeof DB.get === 'function') ? DB.get('orders', []) : [];
       _canonical = _localOrders.find(o => o && o.orderNum === orderNum) || null;
@@ -53,8 +53,21 @@ async function _openFromOrder(order) {
         return;
       }
       // [2026-08-31] Codex 보안 지적: 발주자가 F12로 가짜 order 객체 넘기는 우회 방어
-      //   caller 객체 신뢰 X → orderNum으로 canonical order 재조회 (헬퍼 사용, 서버 fresh 우선)
-      const _canonical = await _fetchCanonicalOrder(order.orderNum);
+      //   caller 객체 신뢰 X → orderNum으로 canonical order 재조회
+      // [2026-09-04 Codex v4 fix] 발주자 경로에선 서버 강제 (fromServer:true), 로컬 fallback 금지 → 조작 order 우회 완전 차단
+      let _canonical = null;
+      if (window._FS && typeof window._FS.getAllOrders === 'function') {
+        try {
+          const _fresh = await window._FS.getAllOrders({ fromServer: true });
+          if (Array.isArray(_fresh)) _canonical = _fresh.find(o => o && o.orderNum === order.orderNum) || null;
+        } catch (_srvErr) {
+          console.warn('[Invoice] openFromOrder canonical order 서버 조회 실패:', _srvErr && _srvErr.message);
+        }
+      }
+      if (!_canonical) {
+        if (typeof toast === 'function') toast('발주서 정보를 확인할 수 없습니다. 새로고침 후 다시 시도해주세요.', 'error');
+        return;
+      }
       if (!_isInvoiceOwner(_canonical, currentUser)) {
         if (typeof toast === 'function') toast('본인이 등록한 발주서만 거래명세서를 조회할 수 있습니다.', 'warning');
         return;
@@ -66,12 +79,19 @@ async function _openFromOrder(order) {
       order = _canonical; // 이후 로직도 canonical 사용
     }
     // 활성 invoice 찾기 (cancelled 제외)
-    const existing = await getInvoicesByOrderNum(order.orderNum);
+    // [2026-09-04 Codex v3 fix] 발주자는 서버 최신 강제 — 캐시 stale 로 sentToCustomer 변경 사항 놓침 방지
+    const existing = await getInvoicesByOrderNum(order.orderNum, { fromServer: !_isAdminUser });
     const active = (existing || []).filter(i => i && !i.cancelled);
     if (active.length > 0) {
       // [2026-08-31] 정책 변경: 출고확정만으로 발주자한테 노출 (sentToCustomer 별도 요구 없음)
       //   기존: 관리자 [전송] 후에만 발주자 열람 가능 → 신규: 자동 노출 (UX 단순화)
+      // [2026-09-04] 컷오프 이전 옛 발주는 옛 정책 (sentToCustomer=true) 유지
       let target = active[active.length - 1];
+      const _autoP = (typeof isInvoiceAutoVisiblePolicy === 'function') ? isInvoiceAutoVisiblePolicy(order) : false;
+      if (!_isAdminUser && !_autoP && !target.sentToCustomer) {
+        if (typeof toast === 'function') toast('관리자가 아직 이 명세서를 전송하지 않았습니다.', 'warning');
+        return;
+      }
       // 예외: needsManualReview 상태(수기편집 후 order 내용 바뀜 → 관리자 재검토 대기)면
       //   발주자한테 stale 금액 노출 방지. 관리자만 볼 수 있게 유지.
       if (!_isAdminUser && target.needsManualReview) {
@@ -153,8 +173,21 @@ async function _openFromSaved(invoice) {
     }
     // C1 보강 (Codex): 발주자는 본인 발주서의 invoice만 열람 가능
     // [2026-08-31] 헬퍼로 통일: canonical order fetch(서버 fresh 우선) + 소유권(legacy fallback 포함)
+    // [2026-09-04 Codex v3 fix] 발주자 경로에선 서버 fetch 실패 시 로컬 fallback 금지 — 조작된 로컬 order 로 우회 방지
     try {
-      const order = await _fetchCanonicalOrder(invoice.orderNum);
+      let order = null;
+      if (window._FS && typeof window._FS.getAllOrders === 'function') {
+        try {
+          const _fresh = await window._FS.getAllOrders({ fromServer: true });
+          if (Array.isArray(_fresh)) order = _fresh.find(o => o && o.orderNum === invoice.orderNum) || null;
+        } catch (_srvErr) {
+          console.warn('[Invoice] openFromSaved canonical order 서버 조회 실패:', _srvErr && _srvErr.message);
+        }
+      }
+      if (!order) {
+        if (typeof toast === 'function') toast('발주서 정보를 확인할 수 없습니다. 새로고침 후 다시 시도해주세요.', 'error');
+        return;
+      }
       if (!_isInvoiceOwner(order, currentUser)) {
         if (typeof toast === 'function') toast('본인이 등록한 발주서만 거래명세서를 조회할 수 있습니다.', 'warning');
         return;
@@ -164,6 +197,41 @@ async function _openFromSaved(invoice) {
         if (typeof toast === 'function') toast('아직 출고확정 전인 발주서입니다.', 'warning');
         return;
       }
+      // [2026-09-04] 컷오프 이전 옛 발주는 sentToCustomer=true 인 명세서만 발주자 열람 가능
+      // [Codex v2 fix] caller 조작 방어 완결:
+      //   1) 서버 원본 강제 조회 ({fromServer:true}) — 캐시 stale 방지
+      //   2) 서버 _matched 객체를 실제 렌더에 사용 (호출자 객체 그대로 넘기면 내용·금액 위조 가능)
+      //   3) needsManualReview·cancelled 도 서버 값으로 재검사
+      const _autoP2 = (typeof isInvoiceAutoVisiblePolicy === 'function') ? isInvoiceAutoVisiblePolicy(order) : false;
+      let _serverInvoice = invoice;
+      try {
+        const _serverInvs = (window._FS && typeof window._FS.get === 'function')
+          ? await window._FS.get('invoices', { fromServer: true })
+          : null;
+        const _list = Array.isArray(_serverInvs) ? _serverInvs : [];
+        const _matched = _list.find(x => x && x.id === invoice.id && x.orderNum === invoice.orderNum);
+        if (!_matched) {
+          if (typeof toast === 'function') toast('명세서를 찾을 수 없습니다.', 'warning');
+          return;
+        }
+        if (_matched.cancelled) {
+          if (typeof toast === 'function') toast('취소된 거래명세서입니다.', 'warning');
+          return;
+        }
+        if (_matched.needsManualReview) {
+          if (typeof toast === 'function') toast('명세서가 관리자 재검토 중입니다. 잠시 후 다시 확인해주세요.', 'warning');
+          return;
+        }
+        if (!_autoP2 && !_matched.sentToCustomer) {
+          if (typeof toast === 'function') toast('관리자가 아직 이 명세서를 전송하지 않았습니다.', 'warning');
+          return;
+        }
+        _serverInvoice = _matched; // 렌더에 서버 원본 사용
+      } catch (_e2) {
+        if (typeof toast === 'function') toast('명세서 확인 중 오류가 발생했습니다.', 'error');
+        return;
+      }
+      invoice = _serverInvoice;
     } catch (_e) {
       if (typeof toast === 'function') toast('권한 확인 중 오류가 발생했습니다.', 'error');
       return;
@@ -288,17 +356,20 @@ function _applyReadonlyMode() {
 async function _listInvoices(orderNum) {
   // 권한: 관리자 외에는 본인 발주서만 노출
   // [2026-08-31] 정책 변경: sentToCustomer 요구 제거 (settlement/orders 화면과 통일)
-  const all = await getInvoicesByOrderNum(orderNum);
   const _isAdminUser = (typeof isAdmin === 'function') && isAdmin();
-  if (_isAdminUser) return all;
   try {
-    // [2026-08-31] 헬퍼로 통일: canonical order fetch(서버 fresh 우선) + 소유권(legacy fallback 포함)
-    const order = await _fetchCanonicalOrder(orderNum);
+    // [2026-09-04 Codex v7 fix] 공개 API 직접 호출도 발주자는 invoice 서버 fresh 강제.
+    const all = await getInvoicesByOrderNum(orderNum, { fromServer: !_isAdminUser });
+    if (_isAdminUser) return all;
+    // openFromSaved v4와 동일: 발주자 canonical order는 서버 fresh만 허용, 로컬 fallback 금지.
+    const order = await _fetchCanonicalOrder(orderNum, { fromServerOnly: true });
     if (!_isInvoiceOwner(order, currentUser)) return [];
     // 발주자는 출고확정 이후만 조회 (발주대기 콘솔 우회 방어)
     if (order.status !== '발주확정' && order.status !== '출고완료') return [];
     // needsManualReview는 관리자 재검토 대기 → 발주자한테 stale 금액 노출 방지
-    return (all || []).filter(i => i && !i.cancelled && !i.needsManualReview);
+    // [2026-09-04] 컷오프 이전 옛 발주는 sentToCustomer=true 만 (옛 정책)
+    const _autoP3 = (typeof isInvoiceAutoVisiblePolicy === 'function') ? isInvoiceAutoVisiblePolicy(order) : false;
+    return (all || []).filter(i => i && !i.cancelled && !i.needsManualReview && (_autoP3 || i.sentToCustomer));
   } catch (_e) {
     return [];
   }

@@ -124,14 +124,37 @@ let LEDGER_MOCK_PAYMENTS = [
 
 /**
  * 전체 출고완료 발주서 조회
- * 발주앱 메인 통합 환경: DB.get 메모리 캐시 사용 (syncFromServer 후)
- * 폴백 환경: 빈 배열
+ * 관리자: DB.get 메모리 캐시, 발주자: 서버 fresh 강제
  * @returns {Promise<Order[]>}
  */
+let _ledgerOrdersServerInflight = null;
+
+async function _fetchLedgerOrders() {
+  const adminView = (typeof isAdmin === 'function') && isAdmin();
+  if (adminView) {
+    return (typeof DB !== 'undefined' && typeof DB.get === 'function') ? DB.get('orders', []) : [];
+  }
+  if (typeof window === 'undefined' || !window._FS || typeof window._FS.getAllOrders !== 'function') return null;
+  if (_ledgerOrdersServerInflight) return _ledgerOrdersServerInflight;
+  _ledgerOrdersServerInflight = (async () => {
+    try {
+      const orders = await window._FS.getAllOrders({ fromServer: true });
+      return Array.isArray(orders) ? orders : null;
+    } catch (e) {
+      console.warn('[ledger] 발주자용 order 서버 조회 실패 → 차단:', e && e.message);
+      return null;
+    }
+  })();
+  try {
+    return await _ledgerOrdersServerInflight;
+  } finally {
+    _ledgerOrdersServerInflight = null;
+  }
+}
+
 async function fetchAllCompletedOrders() {
-  const allOrders = (typeof DB !== 'undefined' && typeof DB.get === 'function')
-    ? DB.get('orders', [])
-    : [];
+  const allOrders = await _fetchLedgerOrders();
+  if (!Array.isArray(allOrders)) return [];
   // [2026-08-26] 정책: 발주대기(화면 '출고대기') 제외 → 관리자 '출고 확정' 이후만 원장 반영
   // 출고완료 + 발주확정(=UI '출고확정') 둘 다 매출 인식 (운영 워크플로우)
   return allOrders.filter(o => o && _canViewLedgerOrder(o) && (o.status === '출고완료' || o.status === '발주확정'));
@@ -147,7 +170,7 @@ function _canViewLedgerOrder(o) {
   return !!deliveryName && orderDelivery === deliveryName;
 }
 
-function _visibleLedgerCustomers() {
+async function _visibleLedgerCustomers() {
   if (typeof isAdmin === 'function' && isAdmin()) return null;
   const user = (typeof currentUser !== 'undefined' && currentUser) ? currentUser : null;
   const names = new Set();
@@ -155,9 +178,8 @@ function _visibleLedgerCustomers() {
     if (user.deliveryName) names.add(String(user.deliveryName).trim());
     if (user.name) names.add(String(user.name).trim());
   }
-  const allOrders = (typeof DB !== 'undefined' && typeof DB.get === 'function')
-    ? DB.get('orders', [])
-    : [];
+  const allOrders = await _fetchLedgerOrders();
+  if (!Array.isArray(allOrders)) return names;
   allOrders.filter(_canViewLedgerOrder).forEach(o => {
     const name = String(o.deliveryTo || o.siteName || '').trim();
     if (name) names.add(name);
@@ -172,9 +194,18 @@ function _visibleLedgerCustomers() {
  */
 async function fetchAllPayments() {
   if (typeof window === 'undefined' || !window._FS || typeof window._FS.collectionGet !== 'function') return [];
-  const arr = await window._FS.collectionGet('hanger_payments');
+  const adminView = (typeof isAdmin === 'function') && isAdmin();
+  let arr;
+  try {
+    arr = adminView
+      ? await window._FS.collectionGet('hanger_payments')
+      : await window._FS.collectionGet('hanger_payments', { fromServer: true });
+  } catch (e) {
+    console.warn('[ledger] 발주자용 payment 서버 조회 실패 → 차단:', e && e.message);
+    return [];
+  }
   if (!Array.isArray(arr)) return [];
-  const allowed = _visibleLedgerCustomers();
+  const allowed = await _visibleLedgerCustomers();
   if (!allowed) return arr;
   return arr.filter(p => p && allowed.has(String(p.customer || '').trim()));
 }
@@ -272,22 +303,33 @@ async function fetchAllInvoices() {
     return []; // 단독 페이지/Mock 환경
   }
   try {
-    const list = await window._FS.get('invoices');
+    // [2026-09-04 Codex v3 fix] 발주자 원장에는 서버 최신 강제 (관리자는 캐시 OK — 지연 있어도 관리 목적).
+    //   서버에서 [전송 취소]/needsManualReview 처리한 결과가 캐시 stale 시 옛 금액 노출됨.
+    const _isAdminUser = (typeof isAdmin === 'function') && isAdmin();
+    const list = _isAdminUser
+      ? await window._FS.get('invoices')
+      : await window._FS.get('invoices', { fromServer: true });
     if (!Array.isArray(list)) return [];
-    if (typeof isAdmin === 'function' && isAdmin()) return list;
-    const allOrders = (typeof DB !== 'undefined' && typeof DB.get === 'function')
-      ? DB.get('orders', [])
-      : [];
-    const allowedOrderNums = new Set(
-      allOrders.filter(_canViewLedgerOrder).map(o => o && o.orderNum).filter(Boolean)
-    );
+    if (_isAdminUser) return list;
     // [2026-08-31] 정책 변경: 출고확정만으로 발주자한테 원장 표시 (sentToCustomer 요구 제거)
     //   단 needsManualReview 상태 invoice는 관리자 재검토 대기 → 발주자한테 stale 금액 노출 금지
-    const adminView = (typeof isAdmin === 'function') && isAdmin();
+    // [2026-09-04 Codex v2 fix] 컷오프 도입: 옛 발주(orderDate < 2026-09-01)는 옛 정책 (sentToCustomer=true) 유지.
+    //   원장 화면에서도 정산·발주목록과 동일 정책 적용 (누락되면 옛 미전송 금액 원장에만 노출됨).
+    // [2026-09-04 Codex v4 fix] 발주자면 order 도 서버 최신 강제 → 로컬 조작 order 로 소유권·컷오프 우회 방어
+    // [2026-09-04 Codex v5/v7 fix] 공용 서버 fresh 조회만 사용하며 실패 시 빈 배열 반환.
+    const orderPool = await _fetchLedgerOrders();
+    if (!Array.isArray(orderPool)) return [];
+    // 발주자 시야: 서버 fresh order 로 소유권·컷오프 판정
+    const orderByNum = {};
+    orderPool.forEach(o => { if (o && o.orderNum) orderByNum[o.orderNum] = o; });
+    const allowedFromFresh = new Set(orderPool.filter(_canViewLedgerOrder).map(o => o && o.orderNum).filter(Boolean));
     return list.filter(inv => {
       if (!inv || inv.cancelled) return false;
-      if (!allowedOrderNums.has(inv.orderNum)) return false;
-      if (!adminView && inv.needsManualReview) return false;
+      if (!allowedFromFresh.has(inv.orderNum)) return false;
+      if (inv.needsManualReview) return false;
+      const _o = orderByNum[inv.orderNum];
+      const _autoP = (typeof isInvoiceAutoVisiblePolicy === 'function') ? isInvoiceAutoVisiblePolicy(_o) : false;
+      if (!_autoP && !inv.sentToCustomer) return false; // 옛 정책: 관리자 [전송] 필수
       return true;
     });
   } catch (e) {
