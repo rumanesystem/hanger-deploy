@@ -456,7 +456,11 @@ async function _autoCreateForOrderLegacy(order) {
       throw wrapped;
     }
     if (typeof toast === 'function') {
-      toast('거래명세서가 자동 발급되었습니다. (' + draft.orderNum + ')', 'success');
+      // [2026-09-03] 발주자용 문구 자연화 (legacy 경로)
+      const _adm = (typeof isAdmin === 'function') && isAdmin();
+      toast(_adm
+        ? ('거래명세서가 자동 발급되었습니다. (' + draft.orderNum + ')')
+        : '발주가 정상 등록되었습니다.', 'success');
     }
     return { created: true };
   } catch (e) {
@@ -610,9 +614,16 @@ async function _autoCreateForOrder(order, options = {}) {
     } else if (result && result.manualReview && typeof toast === 'function') {
       toast('⚠ 수기 편집 명세서와 발주 내용이 달라 발주자 노출을 중단했습니다. 명세서를 확인해주세요.', 'warning');
     } else if (result && result.updated && typeof toast === 'function') {
-      toast('거래명세서가 갱신되었습니다. 발주자에게 다시 전송해주세요. (' + order.orderNum + ')', 'success');
+      // [2026-09-03] 발주자한테는 명세서 개념 노출 X — 자연스러운 안내로
+      const _adm = (typeof isAdmin === 'function') && isAdmin();
+      toast(_adm
+        ? ('거래명세서가 갱신되었습니다. 발주자에게 다시 전송해주세요. (' + order.orderNum + ')')
+        : '발주가 정상 등록되었습니다.', 'success');
     } else if (result && result.created && typeof toast === 'function') {
-      toast('거래명세서가 자동 발급되었습니다. (' + order.orderNum + ')', 'success');
+      const _adm = (typeof isAdmin === 'function') && isAdmin();
+      toast(_adm
+        ? ('거래명세서가 자동 발급되었습니다. (' + order.orderNum + ')')
+        : '발주가 정상 등록되었습니다.', 'success');
     } else if (result && result.unsent && typeof toast === 'function') {
       // [2026-08-03 B3+B6] forceUnsend 로 sent=false 리셋된 경우 명시 알림
       toast('⚠ 거래명세서가 발주자 화면에서 임시로 내려졌습니다. 다시 [전송] 눌러 노출해주세요. (' + order.orderNum + ')', 'warning');

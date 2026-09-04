@@ -2991,7 +2991,56 @@ document.getElementById('content').addEventListener('click',async e=>{
   }
   // 발주서 행 클릭
   const orderRow=e.target.closest('.order-row');
-  if(orderRow&&!e.target.closest('button')){openOrderDetail(parseInt(orderRow.dataset.orderId));return;}
+  if(orderRow&&!e.target.closest('button')){
+    // [2026-09-03] draft 행이면 openOrderDetail 대신 임시저장 편집 흐름으로 진입
+    // [2026-09-03 reviewer High fix] 매직넘버 setTimeout → RAF 폴링(최대 60회) + 실패 toast
+    //   저사양 기기·무거운 DOM·느린 렌더링에서도 조용히 실패 안 함
+    const _draftId=orderRow.dataset.draftId||'';
+    if(_draftId){
+      const _drafts=(typeof DB!=='undefined'&&typeof DB.get==='function')?DB.get('drafts',[]):[];
+      const _d=(_drafts||[]).find(x=>x&&x.draftId===_draftId);
+      if(_d){
+        const _asOrder=(typeof draftAsOrder==='function')?draftAsOrder(_d):null;
+        if(_asOrder){
+          window._pendingEditOrder=_asOrder;
+          try{
+            if(typeof _openOrderModalRender==='function')_openOrderModalRender(null);
+            const _restoreWhenReady=(retry)=>{
+              retry=retry||0;
+              if(retry>60){
+                try{ if(typeof toast==='function') toast('⚠ 임시저장 복원 실패. 새로고침 후 다시 시도하세요.','error'); }catch(_){}
+                return;
+              }
+              if(document.getElementById('o-delivery-to')){
+                try{ if(typeof _restoreDraftToModal==='function') _restoreDraftToModal(_asOrder); }
+                catch(err){
+                  // [2026-09-03 reviewer High fix v2] 복원 함수 예외도 사용자에게 알림
+                  //   [Codex Medium fix] 부분 복원 상태 정리 (열린 모달 + _pendingEditOrder 클리어)
+                  //   그대로 두면 사용자가 저장 시도 → 신규 발주로 잘못 저장 위험
+                  try{console.error('[draft restore]',err);}catch(_){}
+                  try{ window._pendingEditOrder=null; }catch(_){}
+                  try{ if(typeof closeModal==='function') closeModal('order-modal'); }catch(_){}
+                  try{ if(typeof toast==='function') toast('⚠ 임시저장 복원 중 오류. 새로고침 후 다시 시도하세요.','error'); }catch(_){}
+                }
+              } else {
+                requestAnimationFrame(()=>_restoreWhenReady(retry+1));
+              }
+            };
+            requestAnimationFrame(()=>_restoreWhenReady(0));
+          }catch(_e){
+            // 외부 render 예외도 사용자에게 알림
+            try{ if(typeof toast==='function') toast('⚠ 임시저장 편집 모달 열기 실패. 새로고침 후 다시 시도하세요.','error'); }catch(_){}
+          }
+          return;
+        }
+      }
+      // draft 를 못 찾으면(캐시 stale — 다른 곳에서 이미 승격·삭제) 사용자에게 명시 알림
+      try{ if(typeof toast==='function') toast('이 임시저장은 이미 처리되었습니다. 새로고침 후 확인해주세요.','warning'); }catch(_){}
+      return;
+    }
+    openOrderDetail(parseInt(orderRow.dataset.orderId));
+    return;
+  }
   // 재고 기록 발주번호 클릭
   const slogOrderLink=e.target.closest('.slog-order-link');
   if(slogOrderLink){openOrderDetail(parseInt(slogOrderLink.dataset.orderId));return;}
@@ -3167,6 +3216,8 @@ async function _bootSequence(){
           if(acc){
             currentUser={id:acc.id,name:acc.name,deliveryName:acc.deliveryName||'',role:acc.role};
             setLoginTab(acc.role==='admin'?'admin':'orderer');
+            // [2026-09-03 Security Critical fix] 인증 복원 후 drafts 재적재
+            if(typeof window._refreshDraftsCache==='function') await window._refreshDraftsCache().catch(_=>{});
             showApp();
             return;
           }
@@ -3176,6 +3227,7 @@ async function _bootSequence(){
             if(a2){
               currentUser={id:a2.id,name:a2.name,deliveryName:a2.deliveryName||'',role:a2.role};
               setLoginTab(a2.role==='admin'?'admin':'orderer');
+              if(typeof window._refreshDraftsCache==='function') await window._refreshDraftsCache().catch(_=>{});
               showApp();
               return;
             }
@@ -3215,6 +3267,10 @@ function initLoginPrefs_(){
       if(found){
         currentUser={id:found.id,name:found.name,deliveryName:found.deliveryName||'',role:found.role};
         setLoginTab(found.role==='admin'?'admin':'orderer');
+        // [2026-09-03 Security Critical fix] auto-login 경로에도 drafts 재적재 (지연 auth callback 대응)
+        if(typeof window._refreshDraftsCache==='function'){
+          window._refreshDraftsCache().catch(_=>{});
+        }
         showApp();
         return;
       }

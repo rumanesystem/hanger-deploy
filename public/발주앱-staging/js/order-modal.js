@@ -1800,27 +1800,46 @@ async function submitOrder(saveMode='발주확정'){
       try{
         const _stillExists = await getDraft(window._promotingDraftId);
         if(!_stillExists){
+          // [2026-09-03 Codex High fix v3] DRAFT_MISSING 후 사용자가 같은 모달 다시 클릭 시
+          //   신규 발주로 저장돼 원 draft 승격 이력과 중복 발주 위험 → 모달 자체를 닫아 재클릭 차단.
           toast('이 임시저장은 다른 곳에서 이미 처리되었습니다. 새로고침 후 확인해주세요.','warning');
-          window._promotingDraftId=null;
+          try{
+            if(typeof closeModal==='function'){
+              closeModal('order-modal');
+              window._promotingDraftId=null;
+            }
+          }catch(_){}
           return;
         }
       }catch(_chkErr){
+        // [2026-09-03 Codex High fix v2] getDraft 는 실 실패(권한·네트워크) 시 throw.
+        //   flag 를 null 로 만들면 재시도 시 draft 승격 아닌 신규 발주로 저장돼 중복 위험.
+        //   flag 유지 → 재시도해도 승격 flow. 사용자가 모달 닫으면 confirmCloseOrderModal 이 정리.
         console.warn('[draft 승격] 존재 재확인 실패:', _chkErr&&_chkErr.message);
-        toast('임시저장 상태 확인 실패. 새로고침 후 다시 시도해주세요.','error');
-        window._promotingDraftId=null;
+        toast('임시저장 상태 확인 실패. 잠시 후 다시 시도해주세요.','error');
         return;
       }
     }
     ({orderId,shortageCount,order:savedOrder}=await saveOrder({deliveryTo,address,orderDate,shipDate,note,upperMaterials,upperCommonColor,rodItems,rod2400Required,rodTotalLen,rodUnitPrice,rodAmount,rodVat,shelfItems,drawerItems,drawerMemo,etcMemo,sharedColor,totalSupply,totalVat:totalVatAmt,totalAmount,warehouse,proxyOrdererId,proxyOrdererName,proxyCreatedByAdmin:isAdmin()},saveMode));
   }catch(_e){
     // saveOrder 실패: draft/legacy 원본 그대로 유지. 그냥 에러 토스트.
-    window._promotingDraftId=null;
+    // [2026-09-03 Codex High fix] _promotingDraftId 를 실패 시 null 로 만들면
+    //   같은 모달에서 재시도할 때 draft 승격 아닌 신규 발주로 저장돼 원 draft 살아남음
+    //   → 나중에 다시 승격하면 중복 발주 + 재고 이중 차감. flag 유지 시 재시도도 승격 flow.
+    //   DRAFT_MISSING 은 예외 (draft 실제로 사라짐 → flag null 후 재시도해도 신규 발주로 가는 게 안전).
     // [P1-3 팀 지적 fix 2026-08-27] legacy는 _editOverride가 catch에서 유지되므로
     //   _promotingLegacyDraftId도 함께 유지 → 재시도 성공 시 PR 정리 일관성 확보.
     //   모달 닫기·새 발주 진입 시 stale은 openOrderModal/confirmCloseOrderModal에서 정리됨.
     // [flag ON 원자화 2026-08-28] transaction 안에서 draft 사라지면 DRAFT_MISSING throw
     const _msg = (_e && _e.message) || '';
     if(_msg.includes('DRAFT_MISSING')){
+      // [2026-09-03 Codex High fix v3] 모달 닫아 재클릭으로 신규 발주 저장되는 경로 차단
+      try{
+        if(typeof closeModal==='function'){
+          closeModal('order-modal');
+          window._promotingDraftId=null;
+        }
+      }catch(_){}
       toast('이 임시저장은 다른 곳에서 이미 처리되었습니다. 새로고침 후 확인해주세요.','warning');
     } else {
       toast((_msg || '발주 저장 실패. 다시 시도해주세요.'),'error');
@@ -1830,6 +1849,13 @@ async function submitOrder(saveMode='발주확정'){
   // [flag ON 원자화 완결 2026-08-28] draft 삭제는 saveOrder 내부 transaction에서 원자 처리됨.
   //   여기서는 성공 후 플래그 정리만 (기존 사후 deleteDraft 완전 제거 → 3단계 분리 사라짐).
   if(window._promotingDraftId){
+    // [2026-09-03 Codex fix] transaction 삭제된 draft 를 로컬 캐시에서도 제거 → 진행중 목록 ghost 행 방지
+    try{
+      const _pid=window._promotingDraftId;
+      if(window._mem&&Array.isArray(window._mem.drafts)){
+        window._mem.drafts=window._mem.drafts.filter(x=>!(x&&x.draftId===_pid));
+      }
+    }catch(_){}
     window._promotingDraftId=null;
   }
   // [P1-1 코덱스 지적 fix 2026-08-28] legacy 승격 후처리에서 PR 삭제 제거

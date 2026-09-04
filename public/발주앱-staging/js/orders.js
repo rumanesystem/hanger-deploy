@@ -736,12 +736,22 @@ function openOrderConfirmModal(targetStatus){
   if(okBtn){
     // [2026-09-02 S1 dedup] rapid 연타로 발주 중복 생성 방지 (스테이징 adversarial S1)
     //   각 openOrderConfirmModal 호출마다 fresh closure → 재열면 자동 리셋
+    // [2026-09-03 S1 hardening] 부모 order-modal 하단 버튼도 즉시 잠금 →
+    //   submitOrder 완료 전에 [발주 넣기] 재클릭 불가 → 확인 모달 재열림 자체 차단
     let _submitting=false;
     okBtn.onclick=()=>{
       if(_submitting) return;
       _submitting=true;
+      const _pSubmit=document.getElementById('order-submit-btn');
+      const _pPending=document.getElementById('order-pending-btn');
+      const _disable=(el)=>{ if(el){ el.disabled=true; el.style.opacity='0.5'; el.style.pointerEvents='none'; } };
+      _disable(_pSubmit); _disable(_pPending);
       closeModal('order-confirm-modal');
-      submitOrder(_targetStatus);
+      Promise.resolve(submitOrder(_targetStatus)).catch(e=>{ try{console.warn('[submitOrder]',e&&e.message);}catch(_){} }).finally(()=>{
+        // 저장 실패 시 재시도 가능하도록 원상 복구 (성공 시엔 order-modal 닫힘)
+        const _restore=(el)=>{ if(el){ el.disabled=false; el.style.opacity=''; el.style.pointerEvents=''; } };
+        _restore(_pSubmit); _restore(_pPending);
+      });
     };
   }
   openModal('order-confirm-modal');
@@ -1046,6 +1056,29 @@ function renderOrdersTabBar(){
 }
 
 
+// [2026-09-03] hanger_drafts 항목을 진행중 목록에 표시하기 위한 임시 order-shape 변환
+//   임시저장 분리 후에도 관리자·본인이 목록에서 인지·복원할 수 있게 병합 렌더.
+//   _isDraft=true 로 마킹 → 하위 UI 분기(재발주/명세서 버튼 숨김, 클릭 시 draft 복원)에서 사용.
+function draftAsOrder(d){
+  if(!d||typeof d!=='object')return null;
+  const dId=String(d.draftId||'').trim();
+  // [Codex fix] 빈 draftId 방어 — dataset attr 이 "" 되면 일반 order-row 경로로 떨어져 parseInt NaN 위험
+  if(!dId) return null;
+  const p=d.payload||{};
+  return Object.assign({}, p, {
+    id: 'draft:'+dId,
+    orderNum: '임시-'+dId.slice(0,8),
+    status: '임시저장',
+    // [Codex fix] order-modal 승격 로직이 order.draftId 로 신형 draft 판별 → 반드시 포함
+    draftId: dId,
+    createdBy: d.createdBy||'',
+    createdAt: d.createdAt||'',
+    updatedAt: d.updatedAt||'',
+    _isDraft: true,
+    _draftId: dId,
+  });
+}
+
 function renderOrders(){
   // 탭 분기
   if(orderTab==='order-hist'){renderOrdersWithTab();renderOrderHistTab();return;}
@@ -1058,7 +1091,22 @@ function renderOrders(){
   let _focusCaret=null;
   try{ if(document.activeElement&&typeof document.activeElement.selectionStart==='number') _focusCaret=document.activeElement.selectionStart; }catch(_e){}
 
-  const orders=getOrders().filter(o=>{
+  // [2026-09-03] hanger_drafts 병합: active 서브탭 + orderShowDraft 참일 때만.
+  //   취소·보관 탭은 임시저장과 무관하므로 병합하지 않음.
+  let _baseOrders=getOrders();
+  if(orderListSubTab==='active' && orderShowDraft){
+    const _drafts=(typeof DB!=='undefined'&&typeof DB.get==='function')?DB.get('drafts',[]):[];
+    if(Array.isArray(_drafts) && _drafts.length>0){
+      // [Codex fix] 발주자는 자기 draft 만 노출. createdBy 누락 draft 는 발주자한테 절대 안 보임.
+      //   관리자는 전부 조회 (원래 관리 필요).
+      const _me=(currentUser&&currentUser.id)||'';
+      const _adm=(typeof isAdmin==='function')&&isAdmin();
+      const _visibleDrafts=_adm?_drafts:_drafts.filter(d=>d&&_me&&d.createdBy===_me);
+      const _draftOrders=_visibleDrafts.map(draftAsOrder).filter(Boolean);
+      _baseOrders=_baseOrders.concat(_draftOrders);
+    }
+  }
+  const orders=_baseOrders.filter(o=>{
     if(!isAdmin()&&o.createdBy&&o.createdBy!==currentUser.id)return false;
     // 서브탭 기준 필터
     if(orderListSubTab==='cancelled'){if(o.status!=='취소')return false;}
@@ -1128,9 +1176,12 @@ function renderOrders(){
       const lockBadge=rowLocked
         ?'<span class="badge badge-locked" style="margin-left:4px"><i class="fas fa-lock"></i></span>'
         :(o.status==='발주대기'?'<span class="badge" style="margin-left:4px;background:#fefce8;color:#a16207;border:1px solid #fde047"><i class="fas fa-lock-open"></i></span>':'');
-      const cancelBtn=isAdmin()&&orderListSubTab==='active'?`<button class="btn btn-ghost btn-xs order-cancel-btn" data-order-id="${o.id}" style="color:var(--danger);white-space:nowrap"><i class="fas fa-ban"></i> 발주 취소</button>`:'';
+      // [2026-09-03] draft 행은 확정 발주가 아니므로 취소·재발주·명세서 버튼 숨김
+      //   (draft 는 편집 or 삭제만 가능. 편집=클릭해서 상세로 들어가는 방식 기존과 동일)
+      const _rowIsDraft=(o&&o._isDraft===true);
+      const cancelBtn=(!_rowIsDraft&&isAdmin()&&orderListSubTab==='active')?`<button class="btn btn-ghost btn-xs order-cancel-btn" data-order-id="${o.id}" style="color:var(--danger);white-space:nowrap"><i class="fas fa-ban"></i> 발주 취소</button>`:'';
       const uncancelBtn=orderListSubTab==='cancelled'&&(isAdmin()||(currentUser&&o.createdBy===currentUser.id))?`<button class="btn btn-ghost btn-xs order-uncancel-btn" data-order-id="${o.id}" style="color:#16a34a;white-space:nowrap"><i class="fas fa-rotate-left"></i> 취소 되돌리기</button>`:'';
-      const reorderBtn=`<button class="btn btn-outline btn-xs reorder-btn" data-order-id="${o.id}" title="이 발주서로 재발주" style="border:1.5px solid #0ea5e9;color:#0369a1;font-weight:700;white-space:nowrap"><i class="fas fa-rotate-right"></i> 재발주</button>`;
+      const reorderBtn=_rowIsDraft?'':`<button class="btn btn-outline btn-xs reorder-btn" data-order-id="${o.id}" title="이 발주서로 재발주" style="border:1.5px solid #0ea5e9;color:#0369a1;font-weight:700;white-space:nowrap"><i class="fas fa-rotate-right"></i> 재발주</button>`;
       // [2026-08-31] 정책 변경: 출고확정만으로 발주자한테 명세서 버튼 노출 (sentToCustomer 무관)
       //   발주대기 상태는 아직 출고확정 전 → 발주자한테 명세서 안 뜸 (관리자만)
       const _statusOK=(o.status==='출고완료'||o.status==='발주확정'||o.status==='발주대기');
@@ -1143,7 +1194,7 @@ function renderOrders(){
         const orderDelivery = String(o.deliveryTo || o.siteName || '').trim();
         return !!deliveryName && orderDelivery === deliveryName;
       })();
-      const _canSeeInv=isAdmin()?_statusOK:(_isOrdererVisible && _isOwnerRow);
+      const _canSeeInv=(!_rowIsDraft)&&(isAdmin()?_statusOK:(_isOrdererVisible && _isOwnerRow));
       // [2026-08-03 B8] 관리자에게 검토 대기 명세서 뱃지 표시
       const _needsReview=isAdmin()&&_needsReviewOrderNums.has(o.orderNum);
       const reviewBadge=_needsReview?'<span class="badge" style="margin-left:3px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;font-size:10px;padding:2px 6px" title="수기 편집 명세서에 최신 발주 내용 반영 대기. 명세서 열어 확인·저장 필요"><i class="fas fa-exclamation-triangle"></i> 검토</span>':'';
@@ -1168,7 +1219,8 @@ function renderOrders(){
         if(_rawShip&&_rawShip!=='0000-00-00')_shipDateForCell=_rawShip;
       }
       const _shipCell=_shipDateForCell?fmt(_shipDateForCell):'-';
-      return `<tr class="order-row" data-order-id="${o.id}" style="cursor:pointer" title="클릭하여 상세 보기"><td class="td-name">${dTo}</td><td class="td-muted" style="font-size:12px">${addr}</td><td style="font-size:12px;font-weight:600;color:#0f172a">${orderNumEsc}${lockBadge}</td><td class="td-muted">${fmt(o.orderDate)}</td><td class="td-muted">${_shipCell}</td><td class="td-center">${statusBadge}</td><td class="td-center td-muted">${fmt(o.createdAt)}</td>${cancelReasonCell}<td class="td-center">${cancelBtn} ${uncancelBtn} ${reorderBtn} ${invoiceBtn}</td></tr>`;
+      const _rowDraftAttr=_rowIsDraft?` data-draft-id="${_esc(o._draftId||'')}"`:'';
+      return `<tr class="order-row" data-order-id="${_esc(o.id)}"${_rowDraftAttr} style="cursor:pointer" title="클릭하여 상세 보기"><td class="td-name">${dTo}</td><td class="td-muted" style="font-size:12px">${addr}</td><td style="font-size:12px;font-weight:600;color:#0f172a">${orderNumEsc}${lockBadge}</td><td class="td-muted">${fmt(o.orderDate)}</td><td class="td-muted">${_shipCell}</td><td class="td-center">${statusBadge}</td><td class="td-center td-muted">${fmt(o.createdAt)}</td>${cancelReasonCell}<td class="td-center">${cancelBtn} ${uncancelBtn} ${reorderBtn} ${invoiceBtn}</td></tr>`;
     }).join('')}</tbody></table></div>`;
   }
   // 지역 드롭다운: 모든 발주서의 주소에서 첫 단어(시/도) 추출

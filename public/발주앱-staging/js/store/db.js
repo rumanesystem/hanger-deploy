@@ -384,6 +384,11 @@ async function syncFromServer(){
         console.warn('[Phase 3a] hanger_orders 로드 실패, 옛 데이터 유지:', e&&e.message);
       }
     }
+    // [2026-09-03] hanger_drafts 부팅 로드 — 진행중 목록에 임시저장 병합 표시용
+    // [2026-09-03 Security Critical fix] rules 가 hanger_drafts 만 auth.uid 기반 소유 검증.
+    //   부팅 시엔 currentUser 미확정 → 안전하게 빈 배열. 로그인 후 _refreshDraftsCache() 재적재.
+    window._mem['drafts'] = [];
+    await _refreshDraftsCache().catch(e=>console.warn('[drafts 부팅 로드 실패]', e&&e.message));
     // 이후 로컬 diff는 이 클라이언트가 마지막으로 서버에서 받은 상태를 기준으로 계산한다.
     window._memBaseline=_deepCopyMem(window._mem);
   }catch(e){
@@ -733,6 +738,7 @@ async function doLogin(){
 
   currentUser={id:found.id,name:found.name,deliveryName:found.deliveryName||'',role:found.role};
   DB.set('session',currentUser);
+  await _refreshDraftsCache().catch(_=>{});
   showApp();
 }
 
@@ -772,6 +778,11 @@ function doLogout(){
   if(window._fbAuth){window._fbAuth.signOut().catch(()=>{});}
   currentUser=null;
   DB.set('session',null);
+  // [2026-09-03 Security Critical fix] 계정 전환 시 이전 사용자 drafts 캐시 잔존 방지
+  try{
+    if(window._mem){ window._mem.drafts = []; }
+    window._postLoginResynced = false;
+  }catch(_){}
   if(window.LumaneAlertFailures&&typeof window.LumaneAlertFailures.syncForCurrentUser==='function'){
     window.LumaneAlertFailures.syncForCurrentUser();
   }
@@ -881,6 +892,7 @@ async function doAdminSetup(){
   // 생성 후 자동 로그인
   currentUser={id,name,role:'admin'};
   DB.set('session',currentUser);
+  await _refreshDraftsCache().catch(_=>{});
   document.getElementById('admin-setup-screen').classList.remove('active');
   showApp();
   toast(name+'님, 관리자 계정이 생성되었습니다.','success');
@@ -947,6 +959,7 @@ async function doRegister(){
   }
   currentUser={id,name:deliveryName,deliveryName,role:'orderer'};
   DB.set('session',currentUser);
+  await _refreshDraftsCache().catch(_=>{});
   document.getElementById('register-screen').classList.remove('active');
   showApp();
   toast(deliveryName+'님, 가입을 환영합니다!','success');
@@ -2485,14 +2498,68 @@ function _newDraftId(){
   return `draft-${t}-${r}`;
 }
 
+// [2026-09-03 Security Critical fix] 로그인 후 재적재 전용 함수.
+//   rules 가 auth.uid 기반 owner-only. 무필터 collectionGet 은 rules 에서 거부됨.
+//   → where('ownerUid','==',auth.uid) 쿼리로 서버단 owner 필터. 응답 = 자기 것만.
+//   관리자 전체 조회는 P2 (custom claims 세팅 필요).
+//   [race protection] 요청 시 auth.uid 캡처 → 응답 도착 시 여전히 같은 uid 만 캐시 반영.
+// [2026-09-03 v3 Critical fix] firebase.initializeApp(config, 'hanger') 로 named app → firebase.firestore() 기본은 no-app 오류.
+function _getDraftsFirestore(){
+  if(typeof firebase === 'undefined') return null;
+  try{ return firebase.app('hanger').firestore(); }
+  catch(_){ try{ return firebase.firestore(); }catch(__){ return null; } }
+}
+
+async function _refreshDraftsCache(){
+  const _reqUid = (window._fbAuth && window._fbAuth.currentUser && window._fbAuth.currentUser.uid) || '';
+  if(!_reqUid){ window._mem = window._mem || {}; window._mem['drafts'] = []; return; }
+  const _fs = _getDraftsFirestore();
+  if(!_fs){ return; }
+  try{
+    const snaps = await _fs
+      .collection('hanger_drafts')
+      .where('ownerUid','==',_reqUid)
+      .get();
+    const _nowUid = (window._fbAuth && window._fbAuth.currentUser && window._fbAuth.currentUser.uid) || '';
+    if(_nowUid !== _reqUid){
+      console.warn('[_refreshDraftsCache] auth 변경 감지 → 캐시 반영 skip');
+      return;
+    }
+    const arr = [];
+    snaps.forEach(d => arr.push(d.data()));
+    window._mem = window._mem || {};
+    const _prevLen = Array.isArray(window._mem['drafts']) ? window._mem['drafts'].length : 0;
+    window._mem['drafts'] = arr;
+    // [Codex Medium fix] 캐시 갱신 후 목록 재렌더 (auto-login 등 지연 fetch 시 화면 반영)
+    if(arr.length !== _prevLen && typeof window.renderOrders === 'function' && typeof currentView !== 'undefined' && currentView === 'orders'){
+      try{ window.renderOrders(); }catch(_){}
+    }
+  } catch(e){
+    console.warn('[_refreshDraftsCache 실패]', e && e.message);
+    const _nowUid = (window._fbAuth && window._fbAuth.currentUser && window._fbAuth.currentUser.uid) || '';
+    if(_nowUid === _reqUid){
+      window._mem = window._mem || {};
+      window._mem['drafts'] = [];
+    }
+  }
+}
+if(typeof window!=='undefined') window._refreshDraftsCache = _refreshDraftsCache;
+
 async function saveDraft(payload, opts={}){
   if(!window._FS||typeof window._FS.collectionAdd!=='function'){
     throw new Error('draft 저장 기능 미로드');
   }
   const now=new Date().toISOString();
   const draftId=opts.draftId||_newDraftId();
+  // [2026-09-03 Security Critical fix] ownerUid = Firebase Auth uid (rules 검증 키)
+  const _authUid = (window._fbAuth && window._fbAuth.currentUser && window._fbAuth.currentUser.uid) || '';
+  if(!_authUid){
+    throw new Error('draft 저장 실패: 인증 정보 없음. 다시 로그인해주세요.');
+  }
   const doc={
     draftId,
+    // [Codex fix] opts 로 override 금지 — 항상 서버가 알아볼 auth uid 저장 (rules 검증 통과 조건)
+    ownerUid: _authUid,
     createdBy: opts.createdBy||(currentUser?currentUser.id:''),
     createdByName: currentUser?currentUser.name:'',
     createdAt: opts.createdAt||now,
@@ -2500,19 +2567,64 @@ async function saveDraft(payload, opts={}){
     payload: JSON.parse(JSON.stringify(payload||{})),
   };
   await window._FS.collectionAdd('hanger_drafts', draftId, doc);
+  // [2026-09-03 Codex fix] 캐시 갱신 — 저장 후 진행중 목록에 즉시 뜨도록
+  //   [v2 race protection] 저장 완료 후 여전히 같은 auth uid 일 때만 반영
+  try{
+    if(typeof window!=='undefined'){
+      const _nowUid = (window._fbAuth && window._fbAuth.currentUser && window._fbAuth.currentUser.uid) || '';
+      if(_nowUid === _authUid){
+        window._mem=window._mem||{};
+        const arr=Array.isArray(window._mem.drafts)?window._mem.drafts.slice():[];
+        const idx=arr.findIndex(x=>x&&x.draftId===draftId);
+        if(idx>-1) arr[idx]=doc; else arr.push(doc);
+        window._mem.drafts=arr;
+      }
+    }
+  }catch(_){}
   return doc;
 }
 
 async function getDrafts(byUserId){
-  if(!window._FS||typeof window._FS.collectionGet!=='function') return [];
-  const arr=await window._FS.collectionGet('hanger_drafts');
-  if(!Array.isArray(arr)) return [];
-  return byUserId ? arr.filter(d=>d&&d.createdBy===byUserId) : arr;
+  const _reqUid = (window._fbAuth && window._fbAuth.currentUser && window._fbAuth.currentUser.uid) || '';
+  if(!_reqUid) return [];
+  const _fs = _getDraftsFirestore();
+  if(!_fs) return [];
+  try{
+    const snaps = await _fs
+      .collection('hanger_drafts')
+      .where('ownerUid','==',_reqUid)
+      .get();
+    const _nowUid = (window._fbAuth && window._fbAuth.currentUser && window._fbAuth.currentUser.uid) || '';
+    if(_nowUid !== _reqUid) return [];
+    const arr = [];
+    snaps.forEach(d => arr.push(d.data()));
+    return arr;
+  }catch(e){
+    console.warn('[getDrafts 실패]', e && e.message);
+    return [];
+  }
 }
 
 async function getDraft(draftId){
-  const arr=await getDrafts();
-  return arr.find(d=>d&&d.draftId===draftId)||null;
+  const _reqUid = (window._fbAuth && window._fbAuth.currentUser && window._fbAuth.currentUser.uid) || '';
+  if(!_reqUid) return null;
+  if(!draftId) return null;
+  const _fs = _getDraftsFirestore();
+  if(!_fs) throw new Error('firestore 미로드');
+  let snap;
+  try{
+    snap = await _fs
+      .collection('hanger_drafts')
+      .doc(String(draftId))
+      .get();
+  }catch(e){
+    console.warn('[getDraft 조회 실패]', e && e.message);
+    throw e;
+  }
+  const _nowUid = (window._fbAuth && window._fbAuth.currentUser && window._fbAuth.currentUser.uid) || '';
+  if(_nowUid !== _reqUid) throw new Error('사용자 변경 감지 — draft 조회 취소');
+  if(!snap.exists) return null;
+  return snap.data();
 }
 
 async function deleteDraft(draftId){
@@ -2520,6 +2632,12 @@ async function deleteDraft(draftId){
     throw new Error('draft 삭제 기능 미로드');
   }
   await window._FS.collectionDelete('hanger_drafts', draftId);
+  // [2026-09-03 Codex fix] 캐시 갱신 — 승격/삭제 후 ghost 행 제거
+  try{
+    if(typeof window!=='undefined'&&window._mem&&Array.isArray(window._mem.drafts)){
+      window._mem.drafts=window._mem.drafts.filter(x=>!(x&&x.draftId===draftId));
+    }
+  }catch(_){}
 }
 
 if(typeof window!=='undefined'){

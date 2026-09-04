@@ -1,9 +1,30 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      allow read: if true;
-      allow write: if request.auth != null;
+    // hanger_drafts (임시저장 발주서) — 개인정보(고객명·주소·단가) 담김.
+    //   [2026-09-03] rules 강화: 문서에 ownerUid = Firebase Auth uid 저장 → 소유자만 read/write.
+    //   툭탁 등 다른 앱은 이 컬렉션 사용 X (grep 검증 완료). 무영향.
+    //   관리자 전체 조회는 P2 (custom claims 세팅 필요). 현재는 관리자도 자기 것만.
+    match /hanger_drafts/{draftId} {
+      allow read: if request.auth != null
+        && resource != null
+        && resource.data.ownerUid == request.auth.uid;
+      allow create: if request.auth != null
+        && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if request.auth != null
+        && resource != null
+        && resource.data.ownerUid == request.auth.uid
+        && request.resource.data.ownerUid == request.auth.uid;
+      allow delete: if request.auth != null
+        && resource != null
+        && resource.data.ownerUid == request.auth.uid;
+    }
+    // 나머지 컬렉션 — 툭탁·발주앱 공용. 기존 정책 유지 (전면 개방, 인증만 있으면 쓰기).
+    //   subcollection 도 {document=**} 로 매치 유지 (예: jobs/{id}/messages).
+    //   collection 변수로 최상위 이름 잡아 hanger_drafts 만 배제.
+    match /{collection}/{document=**} {
+      allow read: if collection != 'hanger_drafts';
+      allow write: if collection != 'hanger_drafts' && request.auth != null;
     }
   }
 }
