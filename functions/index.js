@@ -1335,3 +1335,10 @@ exports.restoreOrder = onRequest(
   }
 );
 
+
+// ── Supabase 실시간 sync (원본 앱 무접촉 · 별개 함수 파일)
+const supabaseSync = require("./lib/supabase-sync");
+exports.syncOrderCreated = supabaseSync.syncOrderCreated;
+exports.syncOrderUpdated = supabaseSync.syncOrderUpdated;
+exports.syncPaymentCreated = supabaseSync.syncPaymentCreated;
+exports.syncInvoicesDoc = supabaseSync.syncInvoicesDoc;
