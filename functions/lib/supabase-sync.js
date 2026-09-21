@@ -48,8 +48,12 @@ function transformOrder(docId, data) {
     ship_date: validDate(data.shipDate), memo: data.note || "",
     created_at: tsToIso(data.createdAt) || new Date().toISOString(),
     legacy_items: {
-      items: data.items ?? [], drawerItems: data.drawerItems ?? [], upperMaterials: data.upperMaterials ?? [],
-      shelfItems: data.shelfItems ?? [], rodItems: data.rodItems ?? [], totalSupply: data.totalSupply ?? 0,
+      // Firestore items의 이름 필드는 displayName · legacy body는 name을 읽으므로 매핑 필요.
+      items: (data.items ?? []).map((it) => ({ ...it, name: it.displayName ?? it.name ?? "", qty: it.requiredQty ?? it.qty ?? 0 })),
+      drawerItems: (data.drawerItems ?? []).map((it) => ({ ...it, name: it.displayName ?? it.name ?? "", qty: it.requiredQty ?? it.qty ?? 0 })),
+      upperMaterials: (data.upperMaterials ?? []).map((u) => ({ ...u, name: u.displayName ?? u.name ?? "" })),
+      shelfItems: (data.shelfItems ?? []).map((s) => ({ ...s, name: s.displayName ?? s.name ?? "" })),
+      rodItems: data.rodItems ?? [], totalSupply: data.totalSupply ?? 0,
       totalVat: data.totalVat ?? 0, totalAmount: data.totalAmount ?? 0, sharedColor: data.sharedColor ?? "",
       upperCommonColor: data.upperCommonColor ?? "", statusHistory: data.statusHistory ?? [],
       drawerMemo: data.drawerMemo ?? "", etcMemo: data.etcMemo ?? "", firestoreDocId: docId,
