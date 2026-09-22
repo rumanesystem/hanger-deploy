@@ -70,25 +70,19 @@ async function lookupUserId(origId) {
 }
 async function upsertOrder(row, origCreatedBy) {
   const createdBy = await lookupUserId(origCreatedBy);
-  // 우리 앱에서 편집된 발주는 legacy_items 덮어쓰기 X (원본 앱 무관 · 우리 편집 유지).
-  // 존재 여부 + 편집 여부 확인 후 · 편집됨이면 status·ship_date만 갱신하는 별도 경로 사용.
-  const existing = await q("SELECT id, edited_in_new_app FROM orders WHERE order_no=$1", [row.order_no]);
-  if (existing.rows[0]?.edited_in_new_app === true) {
-    // 편집됨 · legacy_items 안 건드림 · status·ship_date만 원본 흐름 반영 (원한다면 이것도 skip 가능).
-    await q(
-      `UPDATE orders SET status=$1, ship_date=$2 WHERE id=$3`,
-      [row.status, row.ship_date, existing.rows[0].id],
-    );
-    return { id: existing.rows[0].id, skippedItems: true };
-  }
+  // 원자적 UPSERT · CASE 로 편집됨(edited_in_new_app=true)이면 legacy_items 원본 보존 · 아니면 갱신.
+  // TOCTOU 방지 · SELECT 후 UPDATE 하는 별도 쿼리 없음.
   const r = await q(
     `INSERT INTO orders (order_no, delivery_to, address, warehouse, status, requested_date, ship_date, memo, created_by, created_at, is_legacy, legacy_items, legacy_source)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true,$11::jsonb,$12)
-     ON CONFLICT (order_no) DO UPDATE SET status=EXCLUDED.status, ship_date=EXCLUDED.ship_date, legacy_items=EXCLUDED.legacy_items
-     RETURNING id`,
+     ON CONFLICT (order_no) DO UPDATE SET
+       status=EXCLUDED.status,
+       ship_date=EXCLUDED.ship_date,
+       legacy_items = CASE WHEN orders.edited_in_new_app THEN orders.legacy_items ELSE EXCLUDED.legacy_items END
+     RETURNING id, edited_in_new_app`,
     [row.order_no, row.delivery_to, row.address, row.warehouse, row.status, row.requested_date, row.ship_date, row.memo, createdBy, row.created_at, JSON.stringify(row.legacy_items), LEGACY_SOURCE],
   );
-  return { id: r.rows[0]?.id };
+  return { id: r.rows[0]?.id, skippedItems: r.rows[0]?.edited_in_new_app === true };
 }
 async function handleOrder(kind, event) {
   const docId = event.params.docId;
