@@ -70,6 +70,17 @@ async function lookupUserId(origId) {
 }
 async function upsertOrder(row, origCreatedBy) {
   const createdBy = await lookupUserId(origCreatedBy);
+  // 우리 앱에서 편집된 발주는 legacy_items 덮어쓰기 X (원본 앱 무관 · 우리 편집 유지).
+  // 존재 여부 + 편집 여부 확인 후 · 편집됨이면 status·ship_date만 갱신하는 별도 경로 사용.
+  const existing = await q("SELECT id, edited_in_new_app FROM orders WHERE order_no=$1", [row.order_no]);
+  if (existing.rows[0]?.edited_in_new_app === true) {
+    // 편집됨 · legacy_items 안 건드림 · status·ship_date만 원본 흐름 반영 (원한다면 이것도 skip 가능).
+    await q(
+      `UPDATE orders SET status=$1, ship_date=$2 WHERE id=$3`,
+      [row.status, row.ship_date, existing.rows[0].id],
+    );
+    return { id: existing.rows[0].id, skippedItems: true };
+  }
   const r = await q(
     `INSERT INTO orders (order_no, delivery_to, address, warehouse, status, requested_date, ship_date, memo, created_by, created_at, is_legacy, legacy_items, legacy_source)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true,$11::jsonb,$12)
