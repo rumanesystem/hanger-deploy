@@ -3,6 +3,7 @@
 const { onDocumentCreated, onDocumentUpdated, onDocumentWritten } = require("firebase-functions/v2/firestore");
 const { logger } = require("firebase-functions");
 const { Pool } = require("pg");
+const { syncOrderItems } = require("./sync-order-items");
 const ADMIN_USER_ID = 1;
 const LEGACY_SOURCE = "hanger-deploy@sync-live";
 const TARGET_SCHEMA = "ordering";
@@ -63,13 +64,23 @@ function transformOrder(docId, data) {
     },
   };
 }
-async function lookupUserId(origId) {
-  if (!origId) return ADMIN_USER_ID;
-  const r = await q("SELECT id FROM users WHERE login_id=$1 LIMIT 1", [`hanger_${origId}`]);
-  return r.rows[0]?.id ?? ADMIN_USER_ID;
+// 발주 주인 찾기 · ① hanger_<원본id> 계정 → ② 납품처명과 일치하는 활성 발주자(정확히 1명일 때만) → ③ 관리자.
+// 동명이인이면 붙이지 않고 관리자로 둬 오배정을 막는다 · 이름으로 붙인 건은 로그로 사후 확인.
+async function lookupUserId(origId, deliveryTo) {
+  if (origId) {
+    const r = await q("SELECT id FROM users WHERE login_id=$1 LIMIT 1", [`hanger_${origId}`]);
+    if (r.rows[0]) return r.rows[0].id;
+  }
+  const name = (deliveryTo ?? "").trim();
+  if (name) {
+    const r2 = await q("SELECT id FROM users WHERE role='orderer' AND active = TRUE AND (delivery_name = $1 OR name = $1)", [name]);
+    if (r2.rowCount === 1) { logger.info("[sync] 납품처명으로 소유자 연결", { deliveryTo: name, userId: r2.rows[0].id }); return r2.rows[0].id; }
+    if (r2.rowCount > 1) logger.warn("[sync] 납품처명 중복 · 관리자 소유 유지", { deliveryTo: name, n: r2.rowCount });
+  }
+  return ADMIN_USER_ID;
 }
 async function upsertOrder(row, origCreatedBy) {
-  const createdBy = await lookupUserId(origCreatedBy);
+  const createdBy = await lookupUserId(origCreatedBy, row.delivery_to);
   // 원자적 UPSERT · CASE 로 편집됨(edited_in_new_app=true)이면 legacy_items 원본 보존 · 아니면 갱신.
   // TOCTOU 방지 · SELECT 후 UPDATE 하는 별도 쿼리 없음.
   const r = await q(
@@ -93,6 +104,15 @@ async function handleOrder(kind, event) {
   try {
     const r = await upsertOrder(row, data.createdBy);
     logger.info(`[sync-${kind}] ${kind === "update" ? "갱신" : "저장"} 완료`, { docId, orderNo: row.order_no, supabaseId: r?.id });
+    // 통계용 품목줄도 맞춘다 · 여기서 실패해도 발주는 이미 들어갔으므로 발주 동기화를 실패로 만들지 않는다.
+    if (r?.id && !r.skippedItems) {
+      try {
+        const it = await syncOrderItems(pool(), TARGET_SCHEMA, r.id, row.legacy_items);
+        logger.info(`[sync-${kind}] 품목`, { orderNo: row.order_no, ...it });
+      } catch (e) {
+        logger.error(`[sync-${kind}] 품목 실패`, { orderNo: row.order_no, error: e.message });
+      }
+    }
   } catch (e) {
     logger.error(`[sync-${kind}] 실패`, { docId, orderNo: row.order_no, error: e.message });
   }
