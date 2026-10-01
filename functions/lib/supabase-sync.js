@@ -4,6 +4,7 @@ const { onDocumentCreated, onDocumentUpdated, onDocumentWritten } = require("fir
 const { logger } = require("firebase-functions");
 const { Pool } = require("pg");
 const { syncOrderItems } = require("./sync-order-items");
+const { insertPayment } = require("./sync-payment-insert");
 const ADMIN_USER_ID = 1;
 const LEGACY_SOURCE = "hanger-deploy@sync-live";
 const TARGET_SCHEMA = "ordering";
@@ -130,17 +131,6 @@ function transformPayment(docId, data) {
     created_at: tsToIso(data.createdAt) || new Date().toISOString(), _docId: docId,
   };
 }
-async function insertPayment(row, origCreatedBy) {
-  const createdBy = await lookupUserId(origCreatedBy);
-  const exists = await q("SELECT id FROM payments WHERE memo LIKE $1 LIMIT 1", [`%[fs:${row._docId}]%`]);
-  if (exists.rowCount > 0) return { id: exists.rows[0].id, inserted: false };
-  const r = await q(
-    `INSERT INTO payments (customer, paid_on, amount, memo, created_by, created_at, is_legacy)
-     VALUES ($1,$2,$3,$4,$5,$6,true) RETURNING id`,
-    [row.customer, row.paid_on, row.amount, row.memo, createdBy, row.created_at],
-  );
-  return { id: r.rows[0]?.id, inserted: true };
-}
 exports.syncPaymentCreated = onDocumentCreated(
   { document: "hanger_payments/{docId}", secrets: [], region: "asia-northeast3" },
   async (event) => {
@@ -150,7 +140,7 @@ exports.syncPaymentCreated = onDocumentCreated(
     const row = transformPayment(docId, data);
     if (!row) { logger.info("[sync-pay] skip · 필수값 없음", { docId }); return; }
     try {
-      const r = await insertPayment(row, data.createdBy);
+      const r = await insertPayment(q, lookupUserId, row, data.createdBy);
       logger.info(r.inserted ? "[sync-pay] 저장 완료" : "[sync-pay] 이미 존재 · skip", { docId, supabaseId: r.id });
     } catch (e) { logger.error("[sync-pay] 저장 실패", { docId, error: e.message }); }
   }
