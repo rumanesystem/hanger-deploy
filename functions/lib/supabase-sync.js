@@ -5,6 +5,7 @@ const { logger } = require("firebase-functions");
 const { Pool } = require("pg");
 const { syncOrderItems } = require("./sync-order-items");
 const { insertPayment } = require("./sync-payment-insert");
+const { inTx, saveLegacyOrder, saveLegacyInvoice } = require("./sync-dup-number");
 const ADMIN_USER_ID = 1;
 const LEGACY_SOURCE = "hanger-deploy@sync-live";
 const TARGET_SCHEMA = "ordering";
@@ -19,13 +20,9 @@ function pool() {
   _pool = new Pool({ connectionString: url, max: 3, idleTimeoutMillis: 10_000, connectionTimeoutMillis: 10_000 });
   return _pool;
 }
-async function q(sql, params) {
-  const client = await pool().connect();
-  try {
-    await client.query(`SET search_path TO ${TARGET_SCHEMA}, public`);
-    return await client.query(sql, params);
-  } finally { client.release(); }
-}
+// 한 문장 실행 · 스키마는 트랜잭션 안에서 SET LOCAL 로 건다 (Transaction pooler 는 트랜잭션 밖 SET 이
+// 다음 문장에 안 이어지거나 다른 접속에 남을 수 있음 → 공용 DB 의 다른 스키마 표를 볼 위험).
+const q = (sql, params) => inTx(pool(), TARGET_SCHEMA, null, (c) => c.query(sql, params));
 
 function tsToIso(v) {
   if (!v) return null;
@@ -80,21 +77,10 @@ async function lookupUserId(origId, deliveryTo) {
   }
   return ADMIN_USER_ID;
 }
+// 저장·번호 겹침 처리는 sync-dup-number.js · 새 앱이 같은 번호를 이미 썼으면 "번호 (1버전)" 으로 저장된다.
 async function upsertOrder(row, origCreatedBy) {
   const createdBy = await lookupUserId(origCreatedBy, row.delivery_to);
-  // 원자적 UPSERT · CASE 로 편집됨(edited_in_new_app=true)이면 legacy_items 원본 보존 · 아니면 갱신.
-  // TOCTOU 방지 · SELECT 후 UPDATE 하는 별도 쿼리 없음.
-  const r = await q(
-    `INSERT INTO orders (order_no, delivery_to, address, warehouse, status, requested_date, ship_date, memo, created_by, created_at, is_legacy, legacy_items, legacy_source)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true,$11::jsonb,$12)
-     ON CONFLICT (order_no) DO UPDATE SET
-       status=EXCLUDED.status,
-       ship_date=EXCLUDED.ship_date,
-       legacy_items = CASE WHEN orders.edited_in_new_app THEN orders.legacy_items ELSE EXCLUDED.legacy_items END
-     RETURNING id, edited_in_new_app`,
-    [row.order_no, row.delivery_to, row.address, row.warehouse, row.status, row.requested_date, row.ship_date, row.memo, createdBy, row.created_at, JSON.stringify(row.legacy_items), LEGACY_SOURCE],
-  );
-  return { id: r.rows[0]?.id, skippedItems: r.rows[0]?.edited_in_new_app === true };
+  return saveLegacyOrder(pool(), TARGET_SCHEMA, row, createdBy, LEGACY_SOURCE);
 }
 async function handleOrder(kind, event) {
   const docId = event.params.docId;
@@ -104,7 +90,8 @@ async function handleOrder(kind, event) {
   if (row.skip) { logger.info(`[sync-${kind}] skip`, { docId, reason: row.reason }); return; }
   try {
     const r = await upsertOrder(row, data.createdBy);
-    logger.info(`[sync-${kind}] ${kind === "update" ? "갱신" : "저장"} 완료`, { docId, orderNo: row.order_no, supabaseId: r?.id });
+    if (r.orderNo !== row.order_no) logger.warn(`[sync-${kind}] 새 앱과 발주번호 겹침 · "${r.orderNo}" 로 저장`, { docId, orderNo: row.order_no });
+    logger.info(`[sync-${kind}] ${kind === "update" ? "갱신" : "저장"} 완료`, { docId, orderNo: r.orderNo, supabaseId: r?.id });
     // 통계용 품목줄도 맞춘다 · 여기서 실패해도 발주는 이미 들어갔으므로 발주 동기화를 실패로 만들지 않는다.
     if (r?.id && !r.skippedItems) {
       try {
@@ -140,45 +127,18 @@ exports.syncPaymentCreated = onDocumentCreated(
     const row = transformPayment(docId, data);
     if (!row) { logger.info("[sync-pay] skip · 필수값 없음", { docId }); return; }
     try {
-      const r = await insertPayment(q, lookupUserId, row, data.createdBy);
+      // 같은 입금 신호가 겹쳐 와도(트리거는 다시 보낼 수 있음) "있나 확인 → 넣기" 사이에 끼어들지 못하게 입금별로 잠근다
+      const lock = { sql: "SELECT pg_advisory_xact_lock(hashtext($1))", params: [`sync-pay:${docId}`] };
+      // 등록자 찾기는 잠그기 전에 (트랜잭션 안에서 접속을 하나 더 쓰면 동시에 몰릴 때 접속이 모자랄 수 있음)
+      const createdBy = await lookupUserId(data.createdBy);
+      const r = await inTx(pool(), TARGET_SCHEMA, lock, (c) => insertPayment((s, p) => c.query(s, p), async () => createdBy, row, data.createdBy));
       logger.info(r.inserted ? "[sync-pay] 저장 완료" : "[sync-pay] 이미 존재 · skip", { docId, supabaseId: r.id });
     } catch (e) { logger.error("[sync-pay] 저장 실패", { docId, error: e.message }); }
   }
 );
 
-async function syncOneInvoice(inv) {
-  const orderNum = inv.orderNum, serial = inv.serial;
-  if (!orderNum || !serial) return "failed";
-  const orderR = await q("SELECT id FROM orders WHERE order_no=$1 LIMIT 1", [orderNum]);
-  const order = orderR.rows[0];
-  if (!order) return "failed";
-  const row = {
-    order_id: order.id, serial,
-    supply_amount: Math.round(Number(inv.totalSupply) || 0),
-    vat_amount: Math.round(Number(inv.totalVat) || 0),
-    total_amount: Math.round(Number(inv.totalAmount) || 0),
-    sent: false, cancelled: inv.cancelled === true,
-    cancelled_at: inv.cancelledAt || null,
-    issued_at: inv.createdAt || new Date().toISOString(),
-    items_json: JSON.stringify(inv.items || []),
-  };
-  const existR = await q("SELECT id FROM invoices WHERE serial=$1 LIMIT 1", [serial]);
-  const existing = existR.rows[0];
-  if (existing) {
-    await q(
-      `UPDATE invoices SET order_id=$1, supply_amount=$2, vat_amount=$3, total_amount=$4,
-        sent=$5, cancelled=$6, cancelled_at=$7, issued_at=$8, items_json=$9::jsonb WHERE id=$10`,
-      [row.order_id, row.supply_amount, row.vat_amount, row.total_amount, row.sent, row.cancelled, row.cancelled_at, row.issued_at, row.items_json, existing.id],
-    );
-    return "updated";
-  }
-  await q(
-    `INSERT INTO invoices (order_id, serial, supply_amount, vat_amount, total_amount, sent, cancelled, cancelled_at, issued_at, items_json)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)`,
-    [row.order_id, row.serial, row.supply_amount, row.vat_amount, row.total_amount, row.sent, row.cancelled, row.cancelled_at, row.issued_at, row.items_json],
-  );
-  return "inserted";
-}
+// 옛 앱 발주에만 붙이고 · 다른 발주가 같은 명세서 번호를 쓰고 있으면 "번호 (1버전)" 으로 저장 (sync-dup-number.js)
+const syncOneInvoice = (inv) => saveLegacyInvoice(pool(), TARGET_SCHEMA, inv);
 exports.syncInvoicesDoc = onDocumentWritten(
   { document: "hanger_data/invoices", region: "asia-northeast3", timeoutSeconds: 300 },
   async (event) => {

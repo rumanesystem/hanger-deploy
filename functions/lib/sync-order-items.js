@@ -20,8 +20,9 @@ async function syncOrderItems(pool, schema, orderId, legacyItems) {
 
   const client = await pool.connect();
   try {
-    await client.query(`SET search_path TO ${schema}`);
+    // 스키마는 트랜잭션 안에서 SET LOCAL · Transaction pooler 는 트랜잭션 밖 SET 이 이어지지 않을 수 있다
     await client.query("BEGIN");
+    await client.query(`SET LOCAL search_path TO ${schema}`);
 
     // 확인과 삭제 사이에 누가 편집하거나 재고를 까면 그대로 지워버리게 된다 · FOR UPDATE 로 잠근다.
     const guard = await client.query(
